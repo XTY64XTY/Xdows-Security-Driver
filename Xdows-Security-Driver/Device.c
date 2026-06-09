@@ -19,6 +19,7 @@ Environment:
 
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text (PAGE, XdowsSecurityDriverCreateDevice)
+#pragma alloc_text (PAGE, XdowsSecurityDriverEvtDeviceContextCleanup)
 #endif
 
 NTSTATUS
@@ -47,10 +48,19 @@ Return Value:
     PDEVICE_CONTEXT deviceContext;
     WDFDEVICE device;
     NTSTATUS status;
+    UNICODE_STRING deviceName;
+    UNICODE_STRING symbolicName;
 
     PAGED_CODE();
 
+    RtlInitUnicodeString(&deviceName, XDOWS_SECURITY_DEVICE_NAME);
+    status = WdfDeviceInitAssignName(DeviceInit, &deviceName);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&deviceAttributes, DEVICE_CONTEXT);
+    deviceAttributes.EvtCleanupCallback = XdowsSecurityDriverEvtDeviceContextCleanup;
 
     status = WdfDeviceCreate(&DeviceInit, &deviceAttributes, &device);
 
@@ -71,6 +81,12 @@ Return Value:
         //
         deviceContext->PrivateDeviceData = 0;
 
+        RtlInitUnicodeString(&symbolicName, XDOWS_SECURITY_SYMBOLIC_NAME);
+        status = WdfDeviceCreateSymbolicLink(device, &symbolicName);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
         //
         // Create a device interface so that applications can find and talk
         // to us.
@@ -87,7 +103,28 @@ Return Value:
             //
             status = XdowsSecurityDriverQueueInitialize(device);
         }
+
+        if (NT_SUCCESS(status)) {
+            status = XdowsInitializeGlobalContext(device);
+        }
+
+        if (NT_SUCCESS(status)) {
+            status = XdowsModulesInitialize();
+        }
     }
 
     return status;
+}
+
+VOID
+XdowsSecurityDriverEvtDeviceContextCleanup(
+    _In_ WDFOBJECT DeviceObject
+    )
+{
+    UNREFERENCED_PARAMETER(DeviceObject);
+
+    PAGED_CODE();
+
+    XdowsModulesShutdown();
+    XdowsShutdownGlobalContext();
 }

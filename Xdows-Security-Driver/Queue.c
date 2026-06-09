@@ -113,14 +113,105 @@ Return Value:
 
 --*/
 {
-    TraceEvents(TRACE_LEVEL_INFORMATION, 
-                TRACE_QUEUE, 
-                "%!FUNC! Queue 0x%p, Request 0x%p OutputBufferLength %d InputBufferLength %d IoControlCode %d", 
-                Queue, Request, (int) OutputBufferLength, (int) InputBufferLength, IoControlCode);
+    NTSTATUS status = STATUS_INVALID_DEVICE_REQUEST;
+    size_t information = 0;
 
-    WdfRequestComplete(Request, STATUS_SUCCESS);
+    UNREFERENCED_PARAMETER(Queue);
 
-    return;
+    TraceEvents(TRACE_LEVEL_INFORMATION,
+                TRACE_QUEUE,
+                "%!FUNC! Request 0x%p OutputBufferLength %d InputBufferLength %d IoControlCode %d",
+                Request, (int) OutputBufferLength, (int) InputBufferLength, IoControlCode);
+
+    switch (IoControlCode) {
+    case IOCTL_XDOWS_SECURITY_REGISTER_CLIENT:
+    {
+        PXDOWS_SECURITY_REGISTER_REQUEST input;
+        PXDOWS_SECURITY_REGISTER_RESPONSE output;
+
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*output), (PVOID*)&output, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = XdowsRegisterClient(input, output);
+        if (NT_SUCCESS(status)) {
+            information = sizeof(*output);
+        }
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_HEARTBEAT:
+    {
+        PXDOWS_SECURITY_HEARTBEAT_REQUEST input;
+
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = XdowsHeartbeat(input);
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_GET_NEXT_EVENT:
+    {
+        PXDOWS_SECURITY_EVENT output;
+
+        UNREFERENCED_PARAMETER(InputBufferLength);
+
+        status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*output), (PVOID*)&output, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = XdowsGetNextPendingEvent(output);
+        if (NT_SUCCESS(status)) {
+            information = sizeof(*output);
+        }
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_SUBMIT_DECISION:
+    {
+        PXDOWS_SECURITY_DECISION input;
+
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = XdowsSubmitDecision(input);
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_GET_STATE:
+    {
+        PXDOWS_SECURITY_STATE output;
+
+        UNREFERENCED_PARAMETER(OutputBufferLength);
+
+        status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*output), (PVOID*)&output, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        XdowsGetState(output);
+        status = STATUS_SUCCESS;
+        information = sizeof(*output);
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_DISCONNECT_CLIENT:
+        XdowsDisconnectClient();
+        status = STATUS_SUCCESS;
+        break;
+    default:
+        status = STATUS_INVALID_DEVICE_REQUEST;
+        break;
+    }
+
+    WdfRequestCompleteWithInformation(Request, status, information);
 }
 
 VOID

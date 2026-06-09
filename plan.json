@@ -1,0 +1,1587 @@
+{
+  "$schema": "https://xdows-security.local/schemas/driver-protection-plan.v1.json",
+  "planVersion": 1,
+  "planId": "xdows-security-driver-protection",
+  "createdAt": "2026-06-09",
+  "language": "zh-CN",
+  "singleSourceOfTruth": "D:\\Code\\Xdows-Security-Driver\\plan.json",
+  "authoringContext": {
+    "accessibleRoots": [
+      "D:\\Code\\Xdows-Security",
+      "D:\\Code\\Xdows-Security-Driver",
+      "D:\\Code\\Xdows-Model"
+    ],
+    "driverSolutionRoot": "D:\\Code\\Xdows-Security-Driver",
+    "driverSolution": "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx",
+    "mainAppSolution": "D:\\Code\\Xdows-Security\\Xdows-Security.slnx",
+    "modelSolution": "D:\\Code\\Xdows-Model\\Xdows-Model.slnx",
+    "observedStack": [
+      "驱动项目：KMDF / WindowsKernelModeDriver10.0 / x64 + ARM64",
+      "主程序：WinUI 3 / .NET 10 / AOT / Protection 项目当前包含 ETW 与 Legacy 防护",
+      "模型项目：.NET 10 / ML.NET / ONNX Runtime，现有 Xdows-Model-Invoker 与 Xdows-Model-Caller"
+    ],
+    "requestSummary": "删除原有 ETW 监控，新增驱动防护并对接用户态 Xdows Model 原生 C++ 调用；进程、文件、注入、主进程保护、关闭 token、环境检测、日志回调均模块化实现。"
+  },
+  "syncProtocol": {
+    "purpose": "支持不同对话、不同模型同步进度。",
+    "statusEnum": [
+      "todo",
+      "in_progress",
+      "blocked",
+      "implemented",
+      "verified",
+      "deferred"
+    ],
+    "updateRules": [
+      "开始任何实现前先运行 cmd.validate-plan 和 cmd.progress-summary。",
+      "每次只更新相关 block/subtask 的 status、implemented、evidence、lastUpdatedAt、lastUpdatedBy、notes 字段。",
+      "稳定 ID 不重命名、不重排；新增工作项使用同级后缀，例如 B06.7。",
+      "implemented=true 表示代码或文件已落地；status=verified 表示交付条件和测试方法已通过。",
+      "遇到架构变更时，追加到 architectureDecisions，不覆盖历史结论。",
+      "跨对话继续时，以 nextRecommendedBlockId 作为默认入口，除非用户另有指示。",
+      "每完成一个 block 过渡（例如 B01 => B02）后，先审查对应变更，再提交对应项目的 git 并推送。"
+    ],
+    "checkpointTemplate": {
+      "lastUpdatedAt": "YYYY-MM-DD",
+      "lastUpdatedBy": "model-or-agent-name",
+      "summary": "本次完成内容",
+      "evidence": [
+        "文件路径、命令、测试结果或截图"
+      ],
+      "next": [
+        "下一步建议"
+      ]
+    }
+  },
+  "progressSummary": {
+    "overallStatus": "in_progress",
+    "nextRecommendedBlockId": "B04.2",
+    "implementedBlockCount": 5,
+    "verifiedBlockCount": 2,
+    "totalBlockCount": 19,
+    "notes": "B01 verified；B02/B03/B05 implemented；B04 native ABI implemented but full ONNX Runtime C/C++ inference/native build is blocked by missing VC targets/ORT headers. Main app Debug x64 build passed."
+  },
+  "globalCommands": [
+    {
+      "id": "cmd.validate-plan",
+      "name": "校验 plan.json",
+      "command": "Get-Content -LiteralPath 'D:\\Code\\Xdows-Security-Driver\\plan.json' -Raw | ConvertFrom-Json | Out-Null",
+      "workingDirectory": "D:\\Code",
+      "requiresAdmin": false,
+      "purpose": "确认计划文件是合法 JSON。"
+    },
+    {
+      "id": "cmd.progress-summary",
+      "name": "查看块级进度",
+      "command": "$p = Get-Content -LiteralPath 'D:\\Code\\Xdows-Security-Driver\\plan.json' -Raw | ConvertFrom-Json; $p.blocks | Select-Object id,title,status,implemented",
+      "workingDirectory": "D:\\Code",
+      "requiresAdmin": false,
+      "purpose": "跨对话接手时快速查看大块状态。"
+    },
+    {
+      "id": "cmd.todo-search",
+      "name": "查找未实现项",
+      "command": "rg '\"implemented\": false|\"status\": \"todo\"|\"status\": \"blocked\"' 'D:\\Code\\Xdows-Security-Driver\\plan.json'",
+      "workingDirectory": "D:\\Code",
+      "requiresAdmin": false,
+      "purpose": "快速定位仍需完成的计划项。"
+    },
+    {
+      "id": "cmd.build-driver-debug-x64",
+      "name": "构建驱动 Debug x64",
+      "command": "msbuild 'D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx' /p:Configuration=Debug /p:Platform=x64",
+      "workingDirectory": "D:\\Code\\Xdows-Security-Driver",
+      "requiresAdmin": false,
+      "purpose": "验证驱动解决方案能构建。"
+    },
+    {
+      "id": "cmd.build-driver-release-x64",
+      "name": "构建驱动 Release x64",
+      "command": "msbuild 'D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx' /p:Configuration=Release /p:Platform=x64",
+      "workingDirectory": "D:\\Code\\Xdows-Security-Driver",
+      "requiresAdmin": false,
+      "purpose": "验证发布配置能构建。"
+    },
+    {
+      "id": "cmd.build-main-app",
+      "name": "构建主程序",
+      "command": "dotnet build 'D:\\Code\\Xdows-Security\\Xdows-Security.slnx' -c Debug -p:Platform=x64",
+      "workingDirectory": "D:\\Code\\Xdows-Security",
+      "requiresAdmin": false,
+      "purpose": "验证 WinUI 主程序和 Protection 项目。"
+    },
+    {
+      "id": "cmd.build-model",
+      "name": "构建模型解决方案",
+      "command": "dotnet build 'D:\\Code\\Xdows-Model\\Xdows-Model.slnx' -c Debug",
+      "workingDirectory": "D:\\Code\\Xdows-Model",
+      "requiresAdmin": false,
+      "purpose": "验证 Xdows Model 及新增原生项目。"
+    },
+    {
+      "id": "cmd.driver-env-check",
+      "name": "手动检查驱动测试环境",
+      "command": "bcdedit /enum '{current}' | findstr /i testsigning; pnputil /enum-drivers | findstr /i Xdows; sc query 'Xdows-Security-Driver'",
+      "workingDirectory": "D:\\Code",
+      "requiresAdmin": true,
+      "purpose": "检查测试模式、驱动包和服务状态。"
+    },
+    {
+      "id": "cmd.install-driver-dev",
+      "name": "开发环境安装驱动",
+      "command": "pnputil /add-driver 'D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf' /install",
+      "workingDirectory": "D:\\Code\\Xdows-Security-Driver",
+      "requiresAdmin": true,
+      "purpose": "在测试机或虚拟机中安装驱动。"
+    },
+    {
+      "id": "cmd.start-driver-service",
+      "name": "启动驱动服务",
+      "command": "sc start 'Xdows-Security-Driver'",
+      "workingDirectory": "D:\\Code",
+      "requiresAdmin": true,
+      "purpose": "启动 INF 中声明的内核服务。"
+    },
+    {
+      "id": "cmd.driver-verifier-query",
+      "name": "查看 Driver Verifier 状态",
+      "command": "verifier /querysettings",
+      "workingDirectory": "D:\\Code",
+      "requiresAdmin": true,
+      "purpose": "调试驱动稳定性前确认验证器配置。"
+    }
+  ],
+  "globalInvariants": [
+    "驱动不直接加载 .NET，也不调用命令行 Caller；扫描由用户态桥接层调用 Xdows-Model-Native 原生 C++ 接口完成。",
+    "内核只做事件采集、挂起等待、策略缓存和最终放行/拦截；复杂模型推理、证书验证、UI 交互均在用户态完成。",
+    "所有拦截行为必须能回调到主程序拦截窗口，并记录到主程序日志。",
+    "进程拦截和文件拦截遇到威胁后必须取得用户明确同意；用户同意则继续，用户拒绝或超时按策略拦截。",
+    "防护主进程仅用于保护 Xdows Security 自身，不提供隐藏、绕过系统安全策略或未授权持久化能力。",
+    "PPL 仅在签名、清单和 Windows 保护服务条件满足时采用；否则使用 ObRegisterCallbacks 保护进程与线程句柄。",
+    "所有内核回调必须遵守 IRQL、分页内存、锁顺序和超时约束，避免在高 IRQL 或持锁状态等待用户态。"
+  ],
+  "architectureDecisions": [
+    {
+      "id": "AD-001",
+      "title": "文件防护采用 minifilter 路径",
+      "status": "proposed",
+      "decision": "在现有驱动解决方案中加入 FltMgr/minifilter 结构处理文件创建、写入完成、重命名等事件；KMDF/控制设备仅负责控制面和 IOCTL。",
+      "reason": "文件系统拦截不适合仅靠 ETW 或普通 KMDF 队列完成，minifilter 才能在文件路径上稳定放行或拒绝。"
+    },
+    {
+      "id": "AD-002",
+      "title": "用户态桥接层承接扫描与 UI 决策",
+      "status": "proposed",
+      "decision": "驱动将待决事件发送给主程序/服务桥接层，桥接层调用原生模型、证书信任验证和拦截窗口，返回 Allow 或 Block。",
+      "reason": "模型推理和用户交互不能放入内核，且主程序已有 InterceptWindow 和 LogService 基础。"
+    },
+    {
+      "id": "AD-003",
+      "title": "Xdows Model 新增原生 C++ 接入",
+      "status": "proposed",
+      "decision": "在 Xdows-Model 中添加 Xdows-Model-Native C++ 项目，使用 ONNX Runtime C/C++ API 暴露稳定 C ABI，不走 Xdows-Model-Caller。",
+      "reason": "满足“不要用 Caller，使用原生接入”的要求，并避免保护路径依赖外部进程启动。"
+    },
+    {
+      "id": "AD-004",
+      "title": "关闭驱动使用一次性会话 token",
+      "status": "proposed",
+      "decision": "驱动启用时生成随机 token 并只回传一次给主程序，自身只保存 SHA-256；停止、卸载、关闭防护必须提交 token 原文并通过哈希校验。",
+      "reason": "降低其它进程伪造关闭命令的风险，且不在驱动中保存明文 token。"
+    },
+    {
+      "id": "AD-005",
+      "title": "原生模型 ABI 先稳定，内部推理实现可替换",
+      "status": "implemented",
+      "decision": "Xdows-Model-Native 暴露稳定 C ABI；当前实现提供本地 PE/启发式扫描壳并由 Protection 的 NativeModelScanner 在 DLL/工具链不可用时降级到托管 ModelInvoker，后续补齐 ONNX Runtime C/C++ headers/libs 后在 ABI 内替换为真实 ORT 推理。",
+      "reason": "本机可访问目录未包含 ORT C/C++ 头文件，且 C++ MSBuild targets 不可用；先固定跨仓库调用边界，避免阻塞 B03/B05 的桥接和进程拦截实现。"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "B00",
+      "title": "计划文件与基线盘点",
+      "status": "verified",
+      "implemented": true,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security",
+        "Xdows-Model"
+      ],
+      "dependsOn": [],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\plan.json"
+      ],
+      "deliveryConditions": [
+        "plan.json 位于 D:\\Code\\Xdows-Security-Driver 根目录。",
+        "计划包含全局命令、同步协议、大块/小块状态、交付条件和测试方法。",
+        "JSON 能通过 PowerShell ConvertFrom-Json 解析。"
+      ],
+      "testMethods": [
+        "运行 cmd.validate-plan。",
+        "运行 cmd.progress-summary，确认能显示块级状态。"
+      ],
+      "subtasks": [
+        {
+          "id": "B00.1",
+          "title": "确认三个可访问仓库和驱动根目录",
+          "status": "verified",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security",
+            "D:\\Code\\Xdows-Security-Driver",
+            "D:\\Code\\Xdows-Model",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx"
+          ]
+        },
+        {
+          "id": "B00.2",
+          "title": "记录当前技术栈和关键入口",
+          "status": "verified",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.vcxproj",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWProcess.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWFiles.cs",
+            "D:\\Code\\Xdows-Model\\Xdows-Model-Invoker\\Xdows-Model-Invoker.csproj"
+          ]
+        },
+        {
+          "id": "B00.3",
+          "title": "创建跨会话同步计划",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\plan.json"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "B01",
+      "title": "需求冻结与威胁模型",
+      "status": "verified",
+      "implemented": true,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B00"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\docs\\driver-protection-spec.md",
+        "D:\\Code\\Xdows-Security-Driver\\plan.json"
+      ],
+      "deliveryConditions": [
+        "12 条用户需求逐条映射到模块、事件、决策和测试。",
+        "明确 Allow/Block/Timeout 语义：发现威胁后用户同意继续，用户拒绝或超时按策略拦截。",
+        "明确兼容模式、旧防护、驱动防护同时存在时的优先级。",
+        "明确哪些能力需要管理员、测试模式、签名或重启。"
+      ],
+      "testMethods": [
+        "人工审查需求追踪表，确认每条原始需求均有 block/subtask 覆盖。",
+        "检查 plan.json 中所有需求相关块均有交付条件和测试方法。"
+      ],
+      "subtasks": [
+        {
+          "id": "B01.1",
+          "title": "建立需求追踪矩阵",
+          "status": "verified",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\docs\\driver-protection-spec.md"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B01.2",
+          "title": "定义阻塞事件模型和用户同意语义",
+          "status": "verified",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\docs\\driver-protection-spec.md"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B01.3",
+          "title": "定义失败策略和超时策略",
+          "status": "verified",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\docs\\driver-protection-spec.md"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B01.4",
+          "title": "记录内核能力边界、PPL 可行性和签名要求",
+          "status": "verified",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\docs\\driver-protection-spec.md"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        }
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\docs\\driver-protection-spec.md",
+        "cmd.validate-plan passed 2026-06-09"
+      ],
+      "lastUpdatedAt": "2026-06-09",
+      "lastUpdatedBy": "Codex",
+      "notes": "需求追踪、阻塞事件语义、失败/超时策略、内核边界和签名要求已冻结。"
+    },
+    {
+      "id": "B02",
+      "title": "驱动基础、协议与模块骨架",
+      "status": "implemented",
+      "implemented": true,
+      "ownerRepos": [
+        "Xdows-Security-Driver"
+      ],
+      "dependsOn": [
+        "B01"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Driver.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Driver.h",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Device.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf"
+      ],
+      "deliveryConditions": [
+        "驱动完成 DriverEntry、Unload、模块化初始化/反初始化顺序。",
+        "Public.h 定义稳定 IOCTL、事件类型、决策类型、版本号、结构体大小和协议校验。",
+        "内核有控制设备或通信端口，支持用户态连接、心跳、待决事件、决策返回和日志拉取。",
+        "INF 不再是模板 TODO，服务名、Provider、Class、ClassGuid、签名/目录文件和安装段完整。",
+        "各模块可独立启停，不互相假设对方已启用。"
+      ],
+      "testMethods": [
+        "运行 cmd.build-driver-debug-x64。",
+        "在测试机运行 cmd.install-driver-dev 与 cmd.start-driver-service。",
+        "加载后用 sc query 和事件日志确认驱动启动/停止无崩溃。",
+        "启用 Driver Verifier 基础规则后完成一次加载、连接、卸载烟测。"
+      ],
+      "subtasks": [
+        {
+          "id": "B02.1",
+          "title": "定义 Public.h 协议版本、IOCTL、事件和决策结构",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B02.2",
+          "title": "完成驱动全局上下文、锁、引用计数和模块注册表",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B02.3",
+          "title": "实现用户态连接、心跳、断线清理和超时处理",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B02.4",
+          "title": "补全 INF 服务、Provider、Class、ClassGuid、签名和安装信息",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B02.5",
+          "title": "为进程、文件、注入、进程保护、日志、token 建立独立模块接口",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ModuleRegistry.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.h"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        }
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ModuleRegistry.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
+        "dotnet msbuild driver Debug x64 blocked: VCTargetsPath/Microsoft.Cpp.Default.props unavailable"
+      ],
+      "lastUpdatedAt": "2026-06-09",
+      "lastUpdatedBy": "Codex",
+      "notes": "协议、控制设备、队列、模块生命周期和 INF 已落地；驱动编译验证被本机缺少 C++/WDK MSBuild targets 阻塞。"
+    },
+    {
+      "id": "B03",
+      "title": "用户态驱动桥接层",
+      "status": "implemented",
+      "implemented": true,
+      "ownerRepos": [
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B02",
+        "B04"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtocol.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\Protection.csproj"
+      ],
+      "deliveryConditions": [
+        "Protection 项目新增 DriverProtection，实现 IProtectionModel 或替代后的统一防护接口。",
+        "桥接层能连接驱动、注册主程序 PID、接收待决事件、调用模型、调用拦截窗口、返回决策。",
+        "桥接层处理驱动断线、主程序关闭、UI 不可用和模型异常。",
+        "桥接层不依赖 Xdows-Model-Caller 进程。"
+      ],
+      "testMethods": [
+        "运行 cmd.build-main-app。",
+        "使用驱动模拟事件，确认桥接层收到并返回 Allow/Block。",
+        "断开驱动或杀掉桥接层，确认驱动不会死锁且 UI 显示环境检测/降级提示。",
+        "检查调用链中没有启动 Xdows-Model-Caller。"
+      ],
+      "subtasks": [
+        {
+          "id": "B03.1",
+          "title": "建立 C# 侧协议结构和 P/Invoke/DeviceIoControl 封装",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtocol.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B03.2",
+          "title": "实现异步事件泵、取消、超时和并发限流",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B03.3",
+          "title": "接入 InterceptWindow 并把用户选择转换为驱动决策",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B03.4",
+          "title": "注册主进程 PID、主窗口句柄和自愿退出状态",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex",
+          "notes": "已注册客户端 PID；主窗口句柄/自愿退出状态留给 B09/B11 UI 控制流继续细化。"
+        },
+        {
+          "id": "B03.5",
+          "title": "桥接驱动日志到主程序 LogService",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex",
+          "notes": "驱动威胁决策进入 LogText/LogService；完整驱动日志拉取属于 B15。"
+        }
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtocol.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
+        "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 0 warnings/0 errors"
+      ],
+      "lastUpdatedAt": "2026-06-09",
+      "lastUpdatedBy": "Codex",
+      "notes": "桥接层、事件泵、主程序决策回调和日志入口已落地；驱动模拟事件 E2E 尚未在可加载驱动环境验证。"
+    },
+    {
+      "id": "B04",
+      "title": "Xdows Model 原生 C++ 接入",
+      "status": "blocked",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Model",
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B01"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Model\\Xdows-Model.slnx",
+        "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\Xdows-Model-Native.vcxproj",
+        "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\include\\xdows_model_native.h",
+        "D:\\Code\\Xdows-Security\\Protection\\NativeModelScanner.cs"
+      ],
+      "deliveryConditions": [
+        "Xdows-Model 中新增原生 C++ 调用项目，不使用 Xdows-Model-Caller。",
+        "原生项目加载现有 ONNX 模型文件，完成与 Xdows-Model-Invoker 一致的特征提取和推理输出。",
+        "暴露稳定 C ABI，例如初始化、扫描文件、释放结果、关闭会话。",
+        "主程序/Protection 通过原生 DLL 或静态库调用模型，并能选择 Flash/Default/Pro 模式。",
+        "模型文件随主程序发布或驱动桥接层可定位。"
+      ],
+      "testMethods": [
+        "运行 cmd.build-model。",
+        "对同一批样本比较 Xdows-Model-Invoker 与 Xdows-Model-Native 输出一致性。",
+        "在主程序 Protection 层调用 NativeModelScanner 扫描正常文件和测试威胁样本。",
+        "确认保护路径不会启动 Xdows-Model-Caller。"
+      ],
+      "subtasks": [
+        {
+          "id": "B04.1",
+          "title": "新增 Xdows-Model-Native C++ 项目并加入解决方案",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Model\\Xdows-Model.slnx",
+            "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\Xdows-Model-Native.vcxproj"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B04.2",
+          "title": "用 ONNX Runtime C/C++ API 加载模型和执行推理",
+          "status": "blocked",
+          "implemented": false,
+          "evidence": [
+            "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\src\\xdows_model_native.cpp",
+            "dotnet build D:\\Code\\Xdows-Model\\Xdows-Model.slnx -c Debug -p:Platform=x64 failed: VCTargetsPath unavailable"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex",
+          "notes": "C ABI scanner currently validates model file and uses native heuristic scan shell；true ONNX Runtime C/C++ inference still needs ORT headers/libs and VC targets。"
+        },
+        {
+          "id": "B04.3",
+          "title": "移植或共享 FeatureExtractor 逻辑并建立一致性测试",
+          "status": "in_progress",
+          "implemented": false,
+          "evidence": [
+            "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\src\\xdows_model_native.cpp",
+            "D:\\Code\\Xdows-Model\\Xdows-Model-Invoker\\FeatureExtractor.cs"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex",
+          "notes": "Native scanner includes PE/entropy/string heuristic shell；full FeatureExtractor parity test remains pending。"
+        },
+        {
+          "id": "B04.4",
+          "title": "暴露 C ABI 和错误码/结果结构",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\include\\xdows_model_native.h"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B04.5",
+          "title": "在 Protection 中添加 NativeModelScanner 封装",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\NativeModelScanner.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        }
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\Xdows-Model-Native.vcxproj",
+        "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\include\\xdows_model_native.h",
+        "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\src\\xdows_model_native.cpp",
+        "D:\\Code\\Xdows-Security\\Protection\\NativeModelScanner.cs",
+        "dotnet build model solution blocked for native vcxproj: VCTargetsPath/Microsoft.Cpp.Default.props unavailable"
+      ],
+      "lastUpdatedAt": "2026-06-09",
+      "lastUpdatedBy": "Codex",
+      "notes": "原生 C ABI、项目和主程序封装已落地；完整 ONNX Runtime C/C++ 推理实现和 native 构建验证被 C++ targets/ORT headers 不可用阻塞。当前 NativeModelScanner 可降级为托管 ModelInvoker，不启动 Caller。"
+    },
+    {
+      "id": "B05",
+      "title": "进程启动拦截与扫描",
+      "status": "implemented",
+      "implemented": true,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B02",
+        "B03",
+        "B04",
+        "B07"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.h",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs"
+      ],
+      "deliveryConditions": [
+        "进程创建时捕获 image path、PID、父 PID、命令行可用字段、发起者信息。",
+        "调用用户态原生 Xdows Model 扫描目标程序。",
+        "发现威胁时阻塞创建流程，回调拦截窗口；用户同意则继续，否则设置创建失败状态。",
+        "无主程序连接、模型异常或超时时按 B01 定义策略处理，且不能导致系统死锁。"
+      ],
+      "testMethods": [
+        "启动正常签名程序，确认无提示或允许后可启动。",
+        "启动测试威胁样本，确认弹出拦截窗口，允许时继续，拒绝时进程未创建。",
+        "桥接层故意延迟超过超时，确认驱动按策略处理并记录日志。",
+        "高并发启动 100 个进程，确认无句柄泄漏和蓝屏。"
+      ],
+      "subtasks": [
+        {
+          "id": "B05.1",
+          "title": "注册 PsSetCreateProcessNotifyRoutineEx 并安全解析创建信息",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B05.2",
+          "title": "将进程创建事件转换为统一待决扫描请求",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B05.3",
+          "title": "桥接层调用 NativeModelScanner 扫描目标 image",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\NativeModelScanner.cs"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B05.4",
+          "title": "根据用户决策放行或拦截进程创建",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B05.5",
+          "title": "实现去重、缓存和并发限流，避免启动风暴卡死系统",
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c"
+          ],
+          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedBy": "Codex"
+        }
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\NativeModelScanner.cs",
+        "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed",
+        "driver build verification blocked: VCTargetsPath/Microsoft.Cpp.Default.props unavailable"
+      ],
+      "lastUpdatedAt": "2026-06-09",
+      "lastUpdatedBy": "Codex",
+      "notes": "进程创建回调、待决事件、用户态扫描、用户决策、缓存和并发限流已落地；内核加载/高并发测试需 C++/WDK 构建环境。"
+    },
+    {
+      "id": "B06",
+      "title": "文件创建、修改、更名拦截与扫描",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B02",
+        "B03",
+        "B04",
+        "B07"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileFilter.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileFilter.h",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf"
+      ],
+      "deliveryConditions": [
+        "minifilter 捕获文件创建、写入完成/关闭、重命名信息。",
+        "对可扫描文件调用用户态原生 Xdows Model，不使用 Caller。",
+        "发现威胁时回调拦截窗口；用户同意则继续，否则拦截打开/重命名或隔离/回滚写入结果。",
+        "记录操作进程 PID/image path，供 B08 做信任证书和二次扫描。",
+        "支持路径规范化，避免 \\Device 路径、重解析点、长路径和大小写导致绕过。"
+      ],
+      "testMethods": [
+        "创建正常文件、修改正常文件、重命名正常文件，确认无误拦截。",
+        "创建/写入/重命名测试威胁样本，确认提示并按用户选择放行或拦截。",
+        "用未签名进程写入威胁文件，确认 B08 能触发操作进程扫描。",
+        "运行文件系统压力测试，确认无死锁、无句柄泄漏、无明显性能退化。"
+      ],
+      "subtasks": [
+        {
+          "id": "B06.1",
+          "title": "将驱动项目扩展为包含 FltMgr/minifilter 回调",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B06.2",
+          "title": "捕获 IRP_MJ_CREATE 并处理创建/打开策略",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B06.3",
+          "title": "捕获写入后的 cleanup/close 扫描点",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B06.4",
+          "title": "捕获 IRP_MJ_SET_INFORMATION 的 rename 场景",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B06.5",
+          "title": "实现文件路径规范化、扩展名/大小过滤和缓存",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B06.6",
+          "title": "根据用户决策执行放行、拒绝、隔离或回滚",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B07",
+      "title": "拦截窗口回调与用户决策",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B03"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml.cs",
+        "D:\\Code\\Xdows-Security\\Helper\\InterceptWindowHelper.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverDecisionService.cs"
+      ],
+      "deliveryConditions": [
+        "所有拦截类型统一走拦截窗口：进程、文件、注入、主进程保护相关敏感操作。",
+        "窗口展示目标路径、操作进程、签名/信任状态、模型结果、风险等级和操作类型。",
+        "用户选择明确：继续/允许、拦截/阻止、信任一次、加入信任列表。",
+        "决策返回驱动前带 correlationId，日志可追踪同一事件。"
+      ],
+      "testMethods": [
+        "模拟每类事件，确认 UI 文案、按钮和决策都正确。",
+        "关闭主窗口或 UI 线程繁忙时，确认桥接层按超时策略处理。",
+        "多事件同时到来时，确认队列顺序和窗口不会互相覆盖。",
+        "检查日志中 correlationId 与驱动事件一致。"
+      ],
+      "subtasks": [
+        {
+          "id": "B07.1",
+          "title": "定义统一 InterceptRequest/InterceptDecision 模型",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B07.2",
+          "title": "扩展拦截窗口支持进程、文件、注入和自保护事件",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B07.3",
+          "title": "实现 UI 调度、队列、超时和取消",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B07.4",
+          "title": "将用户决策写回驱动并记录日志",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B08",
+      "title": "操作进程信任证书与二次扫描",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security",
+        "Xdows-Security-Driver"
+      ],
+      "dependsOn": [
+        "B05",
+        "B06",
+        "B07"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security\\TrustQuarantine\\TrustManager.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\SignerTrustService.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs"
+      ],
+      "deliveryConditions": [
+        "驱动事件包含操作进程 PID/image path 和目标对象。",
+        "用户态校验操作进程 Authenticode 签名、证书链和本项目信任列表。",
+        "检测到目标威胁且操作进程不带信任证书时，追加扫描操作进程本体。",
+        "拦截窗口展示目标威胁与操作进程扫描结果。"
+      ],
+      "testMethods": [
+        "用可信签名进程触发威胁文件操作，确认不做不必要二次扫描或按策略跳过。",
+        "用未签名测试工具触发威胁文件操作，确认扫描操作进程并展示结果。",
+        "篡改签名或无效证书样本应被视为不可信。",
+        "信任列表添加/移除后策略即时生效。"
+      ],
+      "subtasks": [
+        {
+          "id": "B08.1",
+          "title": "实现操作进程路径采集和用户态解析",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B08.2",
+          "title": "实现 Authenticode/证书链/信任列表校验",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B08.3",
+          "title": "威胁事件中对不可信操作进程执行二次模型扫描",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B08.4",
+          "title": "把二次扫描结果合并到拦截窗口和日志",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B09",
+      "title": "主窗口与主进程自保护",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B02",
+        "B03",
+        "B11"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.h",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\MainWindow.xaml.cs",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs"
+      ],
+      "deliveryConditions": [
+        "驱动防护启用后主程序注册受保护 PID、主窗口句柄和自愿退出 token 状态。",
+        "除主程序自愿退出外，其它进程不能通过普通句柄权限终止主进程。",
+        "Ob 回调同时保护进程和线程，覆盖任务管理器注销/终止线程的场景。",
+        "保护规则不阻止主程序更新、正常退出、崩溃转储或系统关机策略。"
+      ],
+      "testMethods": [
+        "使用 taskkill /F、任务管理器、Process Explorer 尝试结束主进程，应被拒绝或无效。",
+        "尝试 OpenProcess(PROCESS_TERMINATE) 和 OpenThread(THREAD_TERMINATE)，确认权限被剥离。",
+        "主程序点击退出时提交 token 后能正常关闭。",
+        "系统关机/注销流程不被无限阻塞。"
+      ],
+      "subtasks": [
+        {
+          "id": "B09.1",
+          "title": "实现受保护 PID/线程集合注册与注销",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B09.2",
+          "title": "注册 ObRegisterCallbacks 保护 PsProcessType",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B09.3",
+          "title": "注册 ObRegisterCallbacks 保护 PsThreadType",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B09.4",
+          "title": "评估并记录 PPL/受保护服务可行性，不满足条件则保持 Ob 回调方案",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B09.5",
+          "title": "实现自愿退出路径与非自愿终止日志",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B10",
+      "title": "防注入防护",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B02",
+        "B03",
+        "B07",
+        "B08"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.h",
+        "D:\\Code\\Xdows-Security\\Protection\\InjectionDecisionService.cs"
+      ],
+      "deliveryConditions": [
+        "阻止未获用户同意的非可信进程获取注入所需危险权限。",
+        "覆盖常见注入前置条件：PROCESS_VM_WRITE、PROCESS_VM_OPERATION、PROCESS_CREATE_THREAD、PROCESS_DUP_HANDLE、THREAD_SET_CONTEXT、THREAD_SUSPEND_RESUME 等。",
+        "对 DLL 加载/映像加载做检测和日志；能在可阻断点前置拦截时必须先询问用户。",
+        "用户允许后建立有时限、可撤销的策略缓存，避免无限弹窗。"
+      ],
+      "testMethods": [
+        "使用自建未签名注入测试工具尝试远程线程注入，应弹窗并按用户选择允许或拦截。",
+        "可信签名进程按策略不应频繁弹窗。",
+        "允许一次后同一源/目标/权限组合在 TTL 内可重试成功，TTL 后重新询问。",
+        "尝试 APC、SetWindowsHookEx、DLL 映像加载等路径，确认至少记录，能拦截的路径被拦截。"
+      ],
+      "subtasks": [
+        {
+          "id": "B10.1",
+          "title": "定义危险句柄权限矩阵和注入事件模型",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B10.2",
+          "title": "在 Ob 回调中剥离未授权危险进程权限",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B10.3",
+          "title": "在 Ob 回调中剥离未授权危险线程权限",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B10.4",
+          "title": "加入映像/DLL 加载检测、日志和后续处置提示",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B10.5",
+          "title": "实现用户同意后的临时策略缓存与撤销",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B11",
+      "title": "关闭驱动 token 与授权控制",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B02",
+        "B03"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.h",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverShutdownToken.cs"
+      ],
+      "deliveryConditions": [
+        "驱动启用时生成高熵随机 token，并在受信连接上回调给主程序一次。",
+        "驱动只保存 token 的 SHA-256，不保存明文。",
+        "停止驱动防护、解除自保护、允许卸载前必须提交 token 并校验通过。",
+        "token 在驱动重载、主程序重新注册或授权关闭后失效。"
+      ],
+      "testMethods": [
+        "提交错误 token 停止驱动，应失败并记录日志。",
+        "提交正确 token，应允许关闭防护并解除自保护。",
+        "内存/日志中不输出 token 明文。",
+        "主程序异常退出后重新连接，旧 token 不应被误用。"
+      ],
+      "subtasks": [
+        {
+          "id": "B11.1",
+          "title": "实现驱动随机 token 生成和一次性回传",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B11.2",
+          "title": "实现内核 SHA-256 哈希保存和常量时间比较",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B11.3",
+          "title": "实现停止/卸载/解除保护 IOCTL 的 token 校验",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B11.4",
+          "title": "主程序仅在内存中保存 token 并在自愿退出时提交",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B12",
+      "title": "删除 ETW 监控与兼容模式强制策略",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B03",
+        "B13"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security\\Protection\\ETW.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\ETWProcess.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\ETWFiles.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\ETWRegistry.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\Protection.csproj",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs"
+      ],
+      "deliveryConditions": [
+        "Protection 项目不再使用 Microsoft.Diagnostics.Tracing.TraceEvent 作为实时防护路径。",
+        "ETWProcess、ETWFiles、ETWRegistry 相关启动入口移除或替换为 DriverProtection/Legacy fallback。",
+        "Process_CompatibilityMode 和 Files_CompatibilityMode 若保留，则被强制开启并禁用手动关闭。",
+        "驱动防护成功加载时，设置-防护中除驱动防护外的其它防护均禁用。",
+        "驱动不可用时，兼容模式 fallback 可提示用户但不重新启用 ETW。"
+      ],
+      "testMethods": [
+        "运行 cmd.build-main-app，确认移除 ETW 引用后编译通过。",
+        "运行 rg 'TraceEvent|ETWProcess|ETWFiles|ETWRegistry|EnableKernelProvider' D:\\Code\\Xdows-Security，确认无实时防护依赖残留。",
+        "打开设置-防护，确认兼容模式开关强制开启/禁用符合策略。",
+        "驱动加载成功后，除驱动防护外其它防护控件不可操作。"
+      ],
+      "subtasks": [
+        {
+          "id": "B12.1",
+          "title": "移除 ETW 实时防护类和 ProtectionStatus 映射",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B12.2",
+          "title": "移除 TraceEvent NuGet 包和相关 using/引用",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B12.3",
+          "title": "保留 LegacyProcess/LegacyFiles 作为兼容模式 fallback，并强制开启对应子项",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B12.4",
+          "title": "更新状态刷新逻辑，使用驱动状态替代 ETW 状态",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B13",
+      "title": "设置-防护新增驱动防护 UI",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B03",
+        "B12",
+        "B14"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANS\\Resources.resw",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANT\\Resources.resw",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\en-US\\Resources.resw"
+      ],
+      "deliveryConditions": [
+        "在 SettingsPage.xaml 的防护分组最前面添加“驱动防护”卡片/开关。",
+        "驱动防护显示状态：未安装、未运行、加载中、已保护、需要修复、错误。",
+        "驱动成功加载后自动禁用其它防护控件，仅驱动防护可操作。",
+        "驱动无法成功运行时启动环境检测对话框。",
+        "新增 zh-HANS、zh-HANT、en-US 本地化资源。"
+      ],
+      "testMethods": [
+        "打开设置页，确认“驱动防护”在防护分组第一项。",
+        "切换驱动防护开关，确认能启动/停止驱动桥接流程。",
+        "模拟驱动加载成功，确认其它防护全部禁用。",
+        "模拟驱动缺失或启动失败，确认环境检测对话框自动出现。",
+        "搜索设置项，确认本地化文本可被搜索/显示。"
+      ],
+      "subtasks": [
+        {
+          "id": "B13.1",
+          "title": "添加驱动防护 SettingsCard/ToggleSwitch 到防护分组最前面",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B13.2",
+          "title": "实现 DriverProtectionToggle_Toggled 和状态刷新",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B13.3",
+          "title": "实现驱动加载成功后禁用其它防护控件",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B13.4",
+          "title": "补充三语言资源和状态文案",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B13.5",
+          "title": "将驱动状态同步到主页防护状态展示",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B14",
+      "title": "驱动环境检测与自动修复对话框",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B02",
+        "B03",
+        "B13",
+        "B16"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverEnvironmentChecker.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverInstaller.cs"
+      ],
+      "deliveryConditions": [
+        "驱动防护不能成功运行时自动打开环境检测对话框。",
+        "检测内容包含：管理员权限、测试模式、驱动 sys/inf/cat 是否存在、服务是否安装、服务是否可启动、模型原生库/模型文件是否存在、驱动通信是否正常。",
+        "可自动修复项提供按钮：安装驱动、启动服务、复制缺失文件、重启桥接、打开测试模式提示。",
+        "无法检测或修复失败时提示用户手动检查，并提示开启兼容模式防护。"
+      ],
+      "testMethods": [
+        "删除或改名 sys/inf/cat，确认检测失败并给出修复项。",
+        "未管理员运行，确认提示提权或重新启动。",
+        "测试模式关闭，确认提示需要开启测试模式/签名驱动和重启。",
+        "服务安装但启动失败，确认显示错误码和日志。",
+        "全部修复后，驱动防护能重新加载。"
+      ],
+      "subtasks": [
+        {
+          "id": "B14.1",
+          "title": "实现 DriverEnvironmentChecker 检测项和结果模型",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B14.2",
+          "title": "实现 WinUI 环境检测对话框",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B14.3",
+          "title": "实现可自动修复项和失败回退提示",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B14.4",
+          "title": "将环境检测结果写入日志并回调 UI",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B15",
+      "title": "日志、事件流与主程序显示",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B02",
+        "B03",
+        "B07"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.h",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Services\\LogService.cs",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Services\\LogStorage.cs"
+      ],
+      "deliveryConditions": [
+        "驱动侧有轻量日志事件环形缓冲或 WPP 记录，用户态可拉取。",
+        "主程序展示驱动防护状态、拦截记录、错误和环境检测日志。",
+        "每个事件有 eventId、correlationId、module、severity、timestamp、message。",
+        "敏感字段脱敏，不记录关闭 token 明文。"
+      ],
+      "testMethods": [
+        "触发进程拦截、文件拦截、注入拦截、自保护拦截，确认日志均显示。",
+        "驱动断线/重连，确认日志不重复、不丢关键错误。",
+        "导出日志，确认包含驱动事件且 token 不泄漏。",
+        "压力下日志缓冲溢出时记录 dropped count。"
+      ],
+      "subtasks": [
+        {
+          "id": "B15.1",
+          "title": "定义驱动日志事件结构和严重级别",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B15.2",
+          "title": "实现驱动日志缓冲和用户态拉取接口",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B15.3",
+          "title": "桥接到 LogService/LogStorage 并显示",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B15.4",
+          "title": "为所有拦截事件添加 correlationId",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B16",
+      "title": "驱动打包、签名、安装与发布",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B02",
+        "B04",
+        "B14"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.vcxproj",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Xdows-Security.csproj"
+      ],
+      "deliveryConditions": [
+        "驱动 sys/inf/cat 能随开发构建产出，开发环境可测试签名。",
+        "主程序发布目录包含驱动包、原生模型库和模型文件。",
+        "安装/升级/卸载流程能处理旧版本驱动和重启需求。",
+        "生产发布路径明确：正式代码签名、驱动签名、可能的 HLK/Attestation 要求。"
+      ],
+      "testMethods": [
+        "干净测试机安装发布包，驱动防护能完成环境检测和安装。",
+        "旧版本升级到新版本，驱动服务和模型库路径正确。",
+        "卸载后驱动服务、文件、策略缓存清理完成。",
+        "关闭测试模式时，未正式签名驱动应被诊断对话框准确说明。"
+      ],
+      "subtasks": [
+        {
+          "id": "B16.1",
+          "title": "完成开发测试签名和 catalog 生成流程",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B16.2",
+          "title": "将驱动包纳入主程序发布输出",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B16.3",
+          "title": "实现安装、升级、卸载和重启提示流程",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B16.4",
+          "title": "记录正式签名和发布要求",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B17",
+      "title": "测试套件与验证矩阵",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security",
+        "Xdows-Model"
+      ],
+      "dependsOn": [
+        "B04",
+        "B05",
+        "B06",
+        "B09",
+        "B10",
+        "B14",
+        "B15"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\tests\\",
+        "D:\\Code\\Xdows-Security\\tests\\",
+        "D:\\Code\\Xdows-Model\\tests\\"
+      ],
+      "deliveryConditions": [
+        "建立模型一致性、协议序列化、桥接层、UI 决策、驱动 VM 集成和压力测试矩阵。",
+        "每个核心模块至少有一个正向、一个拒绝、一个失败/超时测试。",
+        "驱动测试必须在虚拟机或可恢复测试机执行，记录系统版本、测试模式和签名状态。",
+        "Driver Verifier、并发压力和基本性能指标通过。"
+      ],
+      "testMethods": [
+        "运行模型原生一致性测试。",
+        "运行主程序单元/集成测试。",
+        "在 VM 中执行进程、文件、注入、自保护、环境修复端到端脚本。",
+        "启用 Driver Verifier 后重复核心 E2E 测试。",
+        "记录 CPU、内存、平均决策延迟和超时比例。"
+      ],
+      "subtasks": [
+        {
+          "id": "B17.1",
+          "title": "建立测试样本和安全测试工具目录",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B17.2",
+          "title": "实现 Xdows-Model-Native 与 Invoker 一致性测试",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B17.3",
+          "title": "实现驱动桥接层模拟事件测试",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B17.4",
+          "title": "实现 VM 端到端手工/脚本验证清单",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B17.5",
+          "title": "执行 Driver Verifier、压力和性能测试",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    },
+    {
+      "id": "B18",
+      "title": "文档、交接与维护",
+      "status": "todo",
+      "implemented": false,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security",
+        "Xdows-Model"
+      ],
+      "dependsOn": [
+        "B01",
+        "B16",
+        "B17"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\README.md",
+        "D:\\Code\\Xdows-Security-Driver\\docs\\",
+        "D:\\Code\\Xdows-Security\\README.md",
+        "D:\\Code\\Xdows-Model\\README.md",
+        "D:\\Code\\Xdows-Security-Driver\\plan.json"
+      ],
+      "deliveryConditions": [
+        "README 说明开发环境、构建、安装、测试模式、签名、故障排查和卸载。",
+        "记录跨仓库模块关系和协议版本升级规则。",
+        "plan.json 中所有已完成项都有 evidence 和测试结果。",
+        "给后续维护者留下明确的安全边界和常见故障处理流程。"
+      ],
+      "testMethods": [
+        "新人按 README 在干净 VM 中完成构建和驱动防护启动。",
+        "根据文档模拟驱动缺失、签名失败、模型缺失、通信失败并能定位。",
+        "运行 cmd.todo-search，确认没有被遗忘的关键 todo。",
+        "审查 plan.json 的 implemented/status/evidence 是否一致。"
+      ],
+      "subtasks": [
+        {
+          "id": "B18.1",
+          "title": "更新驱动 README 和故障排查文档",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B18.2",
+          "title": "记录协议版本和模块边界",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B18.3",
+          "title": "补充主程序和模型项目相关说明",
+          "status": "todo",
+          "implemented": false
+        },
+        {
+          "id": "B18.4",
+          "title": "最终同步 plan.json 状态和证据",
+          "status": "todo",
+          "implemented": false
+        }
+      ]
+    }
+  ],
+  "lastCheckpoint": {
+    "lastUpdatedAt": "2026-06-09",
+    "lastUpdatedBy": "Codex",
+    "summary": "完成 B01-B05 的文档、驱动协议/模块骨架、用户态桥接、原生模型 ABI 和进程创建拦截代码；主程序构建通过。",
+    "evidence": [
+      "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 0 warnings/0 errors",
+      "dotnet build D:\\Code\\Xdows-Model\\Xdows-Model-Invoker\\Xdows-Model-Invoker.csproj -c Debug passed",
+      "dotnet msbuild driver failed because VCTargetsPath/Microsoft.Cpp.Default.props is unavailable",
+      "dotnet build model solution failed only on native vcxproj because VCTargetsPath/Microsoft.Cpp.Default.props is unavailable"
+    ],
+    "next": [
+      "Install/locate Visual Studio MSBuild C++ targets and WDK, then run cmd.build-driver-debug-x64",
+      "Add ONNX Runtime C/C++ headers/libs to Xdows-Model-Native and replace heuristic shell with true ORT inference",
+      "After B04.2 is unblocked, run process interception E2E and continue B06"
+    ]
+  }
+}

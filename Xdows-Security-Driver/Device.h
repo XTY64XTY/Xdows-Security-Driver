@@ -14,6 +14,8 @@ Environment:
 
 --*/
 
+#pragma once
+
 #include "public.h"
 
 EXTERN_C_START
@@ -42,5 +44,7 @@ NTSTATUS
 XdowsSecurityDriverCreateDevice(
     _Inout_ PWDFDEVICE_INIT DeviceInit
     );
+
+EVT_WDF_OBJECT_CONTEXT_CLEANUP XdowsSecurityDriverEvtDeviceContextCleanup;
 
 EXTERN_C_END

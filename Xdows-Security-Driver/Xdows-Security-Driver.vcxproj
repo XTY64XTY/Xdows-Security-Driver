@@ -23,14 +23,30 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Device.c" />
+    <ClCompile Include="DriverContext.c" />
     <ClCompile Include="Driver.c" />
+    <ClCompile Include="FileProtect.c" />
+    <ClCompile Include="InjectionProtect.c" />
+    <ClCompile Include="Log.c" />
+    <ClCompile Include="ModuleRegistry.c" />
+    <ClCompile Include="ProcessProtect.c" />
     <ClCompile Include="Queue.c" />
+    <ClCompile Include="SelfProtect.c" />
+    <ClCompile Include="TokenAuth.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Device.h" />
+    <ClInclude Include="DriverContext.h" />
     <ClInclude Include="Driver.h" />
+    <ClInclude Include="FileProtect.h" />
+    <ClInclude Include="InjectionProtect.h" />
+    <ClInclude Include="Log.h" />
+    <ClInclude Include="ModuleRegistry.h" />
+    <ClInclude Include="ProcessProtect.h" />
     <ClInclude Include="Public.h" />
     <ClInclude Include="Queue.h" />
+    <ClInclude Include="SelfProtect.h" />
+    <ClInclude Include="TokenAuth.h" />
     <ClInclude Include="Trace.h" />
   </ItemGroup>
   <ItemGroup>
@@ -108,6 +124,9 @@
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
     </DriverSign>
+    <Link>
+      <AdditionalOptions>/INTEGRITYCHECK %(AdditionalOptions)</AdditionalOptions>
+    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -119,6 +138,9 @@
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
     </DriverSign>
+    <Link>
+      <AdditionalOptions>/INTEGRITYCHECK %(AdditionalOptions)</AdditionalOptions>
+    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <ClCompile>
@@ -130,6 +152,9 @@
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
     </DriverSign>
+    <Link>
+      <AdditionalOptions>/INTEGRITYCHECK %(AdditionalOptions)</AdditionalOptions>
+    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <ClCompile>
@@ -141,6 +166,9 @@
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
     </DriverSign>
+    <Link>
+      <AdditionalOptions>/INTEGRITYCHECK %(AdditionalOptions)</AdditionalOptions>
+    </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <FilesToPackage Include="$(TargetPath)" />

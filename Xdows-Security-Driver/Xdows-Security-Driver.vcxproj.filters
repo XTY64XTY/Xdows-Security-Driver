@@ -30,13 +30,37 @@
     <ClInclude Include="Device.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="DriverContext.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Driver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="FileProtect.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="InjectionProtect.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Log.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ModuleRegistry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ProcessProtect.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Public.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Queue.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SelfProtect.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TokenAuth.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Trace.h">
@@ -50,7 +74,31 @@
     <ClCompile Include="Driver.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-   <ClCompile Include="Queue.c">
+    <ClCompile Include="DriverContext.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="FileProtect.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="InjectionProtect.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Log.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ModuleRegistry.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ProcessProtect.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Queue.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SelfProtect.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TokenAuth.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

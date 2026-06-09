@@ -14,11 +14,16 @@ Environment:
 
 --*/
 
+#pragma once
+
 #include <ntddk.h>
 #include <wdf.h>
 #include <initguid.h>
 
 #include "device.h"
+#include "drivercontext.h"
+#include "moduleregistry.h"
+#include "processprotect.h"
 #include "queue.h"
 #include "trace.h"
 

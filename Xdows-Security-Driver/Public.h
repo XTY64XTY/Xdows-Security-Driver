@@ -6,19 +6,135 @@ Module Name:
 
 Abstract:
 
-    This module contains the common declarations shared by driver
-    and user applications.
+    Shared protocol declarations for the Xdows Security driver bridge.
 
 Environment:
 
-    user and kernel
+    User and kernel mode.
 
 --*/
 
-//
-// Define an Interface Guid so that apps can find the device and talk to it.
-//
+#pragma once
 
-DEFINE_GUID (GUID_DEVINTERFACE_XdowsSecurityDriver,
-    0xec5db072,0x8119,0x4d65,0xa7,0xae,0x67,0xd7,0xf3,0x10,0x05,0xe1);
+#define XDOWS_SECURITY_PROTOCOL_VERSION 1u
+#define XDOWS_SECURITY_MAX_PATH_CHARS 520u
+#define XDOWS_SECURITY_MAX_COMMAND_CHARS 1024u
+#define XDOWS_SECURITY_MAX_REASON_CHARS 128u
+
+#define XDOWS_SECURITY_DEVICE_NAME L"\\Device\\XdowsSecurityDriver"
+#define XDOWS_SECURITY_SYMBOLIC_NAME L"\\DosDevices\\XdowsSecurityDriver"
+#define XDOWS_SECURITY_USER_DEVICE_PATH L"\\\\.\\XdowsSecurityDriver"
+
+#define FILE_DEVICE_XDOWS_SECURITY 0x8000u
+
+#define IOCTL_XDOWS_SECURITY_REGISTER_CLIENT \
+    CTL_CODE(FILE_DEVICE_XDOWS_SECURITY, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_XDOWS_SECURITY_HEARTBEAT \
+    CTL_CODE(FILE_DEVICE_XDOWS_SECURITY, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_XDOWS_SECURITY_GET_NEXT_EVENT \
+    CTL_CODE(FILE_DEVICE_XDOWS_SECURITY, 0x803, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_XDOWS_SECURITY_SUBMIT_DECISION \
+    CTL_CODE(FILE_DEVICE_XDOWS_SECURITY, 0x804, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_XDOWS_SECURITY_GET_STATE \
+    CTL_CODE(FILE_DEVICE_XDOWS_SECURITY, 0x805, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_XDOWS_SECURITY_DISCONNECT_CLIENT \
+    CTL_CODE(FILE_DEVICE_XDOWS_SECURITY, 0x806, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+DEFINE_GUID(GUID_DEVINTERFACE_XdowsSecurityDriver,
+    0xec5db072, 0x8119, 0x4d65, 0xa7, 0xae, 0x67, 0xd7, 0xf3, 0x10, 0x05, 0xe1);
 // {ec5db072-8119-4d65-a7ae-67d7f31005e1}
+
+typedef enum _XDOWS_SECURITY_EVENT_TYPE {
+    XdowsSecurityEventNone = 0,
+    XdowsSecurityEventProcessCreate = 1,
+    XdowsSecurityEventFileCreate = 2,
+    XdowsSecurityEventFileWrite = 3,
+    XdowsSecurityEventFileRename = 4,
+    XdowsSecurityEventProcessHandle = 5,
+    XdowsSecurityEventThreadHandle = 6,
+    XdowsSecurityEventImageLoad = 7,
+    XdowsSecurityEventDriverLog = 8
+} XDOWS_SECURITY_EVENT_TYPE;
+
+typedef enum _XDOWS_SECURITY_DECISION_TYPE {
+    XdowsSecurityDecisionUnknown = 0,
+    XdowsSecurityDecisionAllow = 1,
+    XdowsSecurityDecisionBlock = 2,
+    XdowsSecurityDecisionTimeout = 3
+} XDOWS_SECURITY_DECISION_TYPE;
+
+typedef enum _XDOWS_SECURITY_MODEL_MODE {
+    XdowsSecurityModelStandard = 0,
+    XdowsSecurityModelFlash = 1,
+    XdowsSecurityModelPro = 2
+} XDOWS_SECURITY_MODEL_MODE;
+
+typedef enum _XDOWS_SECURITY_EVENT_FLAGS {
+    XdowsSecurityEventFlagNone = 0x00000000u,
+    XdowsSecurityEventFlagFileOpenNameAvailable = 0x00000001u,
+    XdowsSecurityEventFlagUserModeRequired = 0x00000002u,
+    XdowsSecurityEventFlagThreatConfirmed = 0x00000004u
+} XDOWS_SECURITY_EVENT_FLAGS;
+
+typedef struct _XDOWS_SECURITY_PROTOCOL_HEADER {
+    ULONG Size;
+    ULONG Version;
+} XDOWS_SECURITY_PROTOCOL_HEADER, *PXDOWS_SECURITY_PROTOCOL_HEADER;
+
+typedef struct _XDOWS_SECURITY_REGISTER_REQUEST {
+    XDOWS_SECURITY_PROTOCOL_HEADER Header;
+    ULONG ClientProcessId;
+    ULONG Flags;
+    ULONG HeartbeatTimeoutMs;
+    ULONG Reserved;
+} XDOWS_SECURITY_REGISTER_REQUEST, *PXDOWS_SECURITY_REGISTER_REQUEST;
+
+typedef struct _XDOWS_SECURITY_REGISTER_RESPONSE {
+    XDOWS_SECURITY_PROTOCOL_HEADER Header;
+    ULONG Status;
+    ULONG ProtocolVersion;
+    ULONG DefaultKernelWaitTimeoutMs;
+    ULONG Reserved;
+} XDOWS_SECURITY_REGISTER_RESPONSE, *PXDOWS_SECURITY_REGISTER_RESPONSE;
+
+typedef struct _XDOWS_SECURITY_HEARTBEAT_REQUEST {
+    XDOWS_SECURITY_PROTOCOL_HEADER Header;
+    ULONG ClientProcessId;
+    ULONG Reserved;
+} XDOWS_SECURITY_HEARTBEAT_REQUEST, *PXDOWS_SECURITY_HEARTBEAT_REQUEST;
+
+typedef struct _XDOWS_SECURITY_EVENT {
+    XDOWS_SECURITY_PROTOCOL_HEADER Header;
+    ULONGLONG EventId;
+    ULONGLONG CorrelationId;
+    ULONG EventType;
+    ULONG Flags;
+    ULONG ProcessId;
+    ULONG ParentProcessId;
+    ULONG CreatingProcessId;
+    ULONG CreatingThreadId;
+    ULONG KernelWaitTimeoutMs;
+    ULONG Reserved;
+    WCHAR ImagePath[XDOWS_SECURITY_MAX_PATH_CHARS];
+    WCHAR CommandLine[XDOWS_SECURITY_MAX_COMMAND_CHARS];
+} XDOWS_SECURITY_EVENT, *PXDOWS_SECURITY_EVENT;
+
+typedef struct _XDOWS_SECURITY_DECISION {
+    XDOWS_SECURITY_PROTOCOL_HEADER Header;
+    ULONGLONG EventId;
+    ULONG Decision;
+    ULONG CacheTtlMs;
+    ULONG ResultCode;
+    ULONG Reserved;
+    WCHAR Reason[XDOWS_SECURITY_MAX_REASON_CHARS];
+} XDOWS_SECURITY_DECISION, *PXDOWS_SECURITY_DECISION;
+
+typedef struct _XDOWS_SECURITY_STATE {
+    XDOWS_SECURITY_PROTOCOL_HEADER Header;
+    ULONG ClientConnected;
+    ULONG PendingEventCount;
+    ULONG DroppedEventCount;
+    ULONG ProcessProtectionEnabled;
+    ULONG ProtocolVersion;
+    ULONG Reserved;
+} XDOWS_SECURITY_STATE, *PXDOWS_SECURITY_STATE;
