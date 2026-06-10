@@ -55,11 +55,11 @@
   },
   "progressSummary": {
     "overallStatus": "in_progress",
-    "nextRecommendedBlockId": "B13",
-    "implementedBlockCount": 12,
+    "nextRecommendedBlockId": "B14",
+    "implementedBlockCount": 13,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
-    "notes": "B01 verified；B02/B03/B05/B06 implemented；B04 native ABI remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed after B06-B13 work; driver build blocked by missing Microsoft.Cpp.Default.props."
+    "notes": "B01 verified；B02/B03/B05-B13 implemented；B04 native ABI remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed. Driver build remains blocked on this machine because Microsoft.Cpp.Default.props / VS C++ WDK targets are missing."
   },
   "globalCommands": [
     {
@@ -1555,8 +1555,8 @@
     {
       "id": "B13",
       "title": "设置-防护新增驱动防护 UI",
-      "status": "todo",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Security"
       ],
@@ -1590,34 +1590,101 @@
         {
           "id": "B13.1",
           "title": "添加驱动防护 SettingsCard/ToggleSwitch 到防护分组最前面",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\HomePage.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANS\\Resources.resw",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANT\\Resources.resw",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\en-US\\Resources.resw",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B13.2",
           "title": "实现 DriverProtectionToggle_Toggled 和状态刷新",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\HomePage.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANS\\Resources.resw",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANT\\Resources.resw",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\en-US\\Resources.resw",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B13.3",
           "title": "实现驱动加载成功后禁用其它防护控件",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\HomePage.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANS\\Resources.resw",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANT\\Resources.resw",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\en-US\\Resources.resw",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B13.4",
           "title": "补充三语言资源和状态文案",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\HomePage.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANS\\Resources.resw",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANT\\Resources.resw",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\en-US\\Resources.resw",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B13.5",
           "title": "将驱动状态同步到主页防护状态展示",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\HomePage.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANS\\Resources.resw",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANT\\Resources.resw",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\en-US\\Resources.resw",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         }
-      ]
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\HomePage.xaml.cs",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANS\\Resources.resw",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\zh-HANT\\Resources.resw",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Strings\\en-US\\Resources.resw",
+        "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+      ],
+      "lastUpdatedAt": "2026-06-10",
+      "lastUpdatedBy": "Codex",
+      "notes": "设置-防护分组首项新增驱动防护卡片/开关和状态文本；驱动运行后禁用旧防护控件；驱动启动失败弹出环境检测提示；主页防护状态同步显示驱动状态；三语言资源已补充。"
     },
     {
       "id": "B14",
@@ -1931,15 +1998,16 @@
   "lastCheckpoint": {
     "lastUpdatedAt": "2026-06-10",
     "lastUpdatedBy": "Codex",
-    "summary": "完成 B12 删除 ETW 监控与兼容模式强制策略。",
+    "summary": "完成至 B13：文件防护、拦截决策、操作进程信任/二次扫描、自保护、防注入、shutdown token、移除 ETW、设置页驱动防护 UI。",
     "evidence": [
-      "ETW*.cs deleted",
-      "TraceEvent package removed",
-      "rg ETW/TraceEvent realtime search returned no matches",
-      "Main app Debug x64 build passed"
+      "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+      "rg 'TraceEvent|ETWProcess|ETWFiles|ETWRegistry|EnableKernelProvider|Microsoft.Diagnostics.Tracing' D:\\Code\\Xdows-Security returned no matches",
+      "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
     ],
     "next": [
-      "Continue B13 Settings protection UI"
+      "B14: implement full driver environment checker and repair dialog",
+      "Install Visual Studio C++ build tools and WDK targets, then run cmd.build-driver-debug-x64",
+      "Resolve B04 ONNX Runtime native C/C++ integration when ORT headers/libs and C++ targets are available"
     ]
   }
 }
