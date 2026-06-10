@@ -55,11 +55,11 @@
   },
   "progressSummary": {
     "overallStatus": "in_progress",
-    "nextRecommendedBlockId": "B14",
-    "implementedBlockCount": 13,
+    "nextRecommendedBlockId": "B15",
+    "implementedBlockCount": 14,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
-    "notes": "B01 verified；B02/B03/B05-B13 implemented；B04 native ABI remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed. Driver build remains blocked on this machine because Microsoft.Cpp.Default.props / VS C++ WDK targets are missing."
+    "notes": "B01 verified；B02/B03/B05-B14 implemented；B04 native ABI remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed. Driver build remains blocked on this machine because Microsoft.Cpp.Default.props / VS C++ WDK targets are missing."
   },
   "globalCommands": [
     {
@@ -1689,8 +1689,8 @@
     {
       "id": "B14",
       "title": "驱动环境检测与自动修复对话框",
-      "status": "todo",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Security"
       ],
@@ -1723,28 +1723,79 @@
         {
           "id": "B14.1",
           "title": "实现 DriverEnvironmentChecker 检测项和结果模型",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverEnvironmentChecker.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverInstaller.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B14.2",
           "title": "实现 WinUI 环境检测对话框",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverEnvironmentChecker.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverInstaller.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B14.3",
           "title": "实现可自动修复项和失败回退提示",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverEnvironmentChecker.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverInstaller.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B14.4",
           "title": "将环境检测结果写入日志并回调 UI",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverEnvironmentChecker.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverInstaller.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         }
-      ]
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security\\Protection\\DriverEnvironmentChecker.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverInstaller.cs",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml.cs",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+        "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+      ],
+      "lastUpdatedAt": "2026-06-10",
+      "lastUpdatedBy": "Codex",
+      "notes": "实现驱动环境检测模型、自动修复入口和 WinUI 检测对话框；驱动启动失败时设置页打开检测 UI；检测结果和修复结果写入主程序日志。"
     },
     {
       "id": "B15",
@@ -1998,14 +2049,17 @@
   "lastCheckpoint": {
     "lastUpdatedAt": "2026-06-10",
     "lastUpdatedBy": "Codex",
-    "summary": "完成至 B13：文件防护、拦截决策、操作进程信任/二次扫描、自保护、防注入、shutdown token、移除 ETW、设置页驱动防护 UI。",
+    "summary": "完成 B14：驱动环境检测与自动修复对话框。",
     "evidence": [
-      "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-      "rg 'TraceEvent|ETWProcess|ETWFiles|ETWRegistry|EnableKernelProvider|Microsoft.Diagnostics.Tracing' D:\\Code\\Xdows-Security returned no matches",
-      "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+      "D:\\Code\\Xdows-Security\\Protection\\DriverEnvironmentChecker.cs",
+      "D:\\Code\\Xdows-Security\\Protection\\DriverInstaller.cs",
+      "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml",
+      "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml.cs",
+      "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
+      "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
     ],
     "next": [
-      "B14: implement full driver environment checker and repair dialog",
+      "B15: implement driver log ring buffer, pull IOCTL, and main app log display bridge",
       "Install Visual Studio C++ build tools and WDK targets, then run cmd.build-driver-debug-x64",
       "Resolve B04 ONNX Runtime native C/C++ integration when ORT headers/libs and C++ targets are available"
     ]
