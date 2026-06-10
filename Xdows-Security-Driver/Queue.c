@@ -15,6 +15,8 @@ Environment:
 --*/
 
 #include "driver.h"
+#include "selfprotect.h"
+#include "tokenauth.h"
 #include "queue.tmh"
 
 #ifdef ALLOC_PRAGMA
@@ -206,6 +208,68 @@ Return Value:
         XdowsDisconnectClient();
         status = STATUS_SUCCESS;
         break;
+    case IOCTL_XDOWS_SECURITY_REGISTER_PROTECTED_PROCESS:
+    {
+        PXDOWS_SECURITY_PROTECTED_PROCESS_REQUEST input;
+
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        if (input->Header.Size != sizeof(*input) ||
+            input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION) {
+            status = STATUS_REVISION_MISMATCH;
+            break;
+        }
+
+        status = XdowsSelfProtectRegisterProcess(input->ProcessId, input->MainThreadId, input->Flags);
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_SET_VOLUNTARY_EXIT:
+    {
+        PXDOWS_SECURITY_VOLUNTARY_EXIT_REQUEST input;
+
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        if (input->Header.Size != sizeof(*input) ||
+            input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION) {
+            status = STATUS_REVISION_MISMATCH;
+            break;
+        }
+
+        status = XdowsSelfProtectSetVoluntaryExit(input->ProcessId, input->IsVoluntaryExit != 0);
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_AUTHORIZED_SHUTDOWN:
+    {
+        PXDOWS_SECURITY_SHUTDOWN_REQUEST input;
+
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        if (input->Header.Size != sizeof(*input) ||
+            input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION) {
+            status = STATUS_REVISION_MISMATCH;
+            break;
+        }
+
+        if (!XdowsTokenAuthValidate(input->ShutdownToken)) {
+            status = STATUS_ACCESS_DENIED;
+            break;
+        }
+
+        XdowsSelfProtectClearRegistration();
+        XdowsTokenAuthInvalidate();
+        XdowsDisconnectClient();
+        status = STATUS_SUCCESS;
+        break;
+    }
     default:
         status = STATUS_INVALID_DEVICE_REQUEST;
         break;

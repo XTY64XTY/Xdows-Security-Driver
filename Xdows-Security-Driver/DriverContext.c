@@ -11,6 +11,7 @@ Abstract:
 --*/
 
 #include "driver.h"
+#include "tokenauth.h"
 
 XDOWS_DRIVER_CONTEXT g_XdowsDriverContext;
 
@@ -119,6 +120,9 @@ XdowsRegisterClient(
     Response->Status = STATUS_SUCCESS;
     Response->ProtocolVersion = XDOWS_SECURITY_PROTOCOL_VERSION;
     Response->DefaultKernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
+    (VOID)XdowsTokenAuthCopyOneTimeToken(
+        Response->ShutdownToken,
+        RTL_NUMBER_OF(Response->ShutdownToken));
 
     KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
     g_XdowsDriverContext.ClientConnected = TRUE;

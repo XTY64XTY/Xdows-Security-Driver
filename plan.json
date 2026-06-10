@@ -55,8 +55,8 @@
   },
   "progressSummary": {
     "overallStatus": "in_progress",
-    "nextRecommendedBlockId": "B11",
-    "implementedBlockCount": 10,
+    "nextRecommendedBlockId": "B12",
+    "implementedBlockCount": 11,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
     "notes": "B01 verified；B02/B03/B05/B06 implemented；B04 native ABI remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed after B06-B13 work; driver build blocked by missing Microsoft.Cpp.Default.props."
@@ -1326,8 +1326,8 @@
     {
       "id": "B11",
       "title": "关闭驱动 token 与授权控制",
-      "status": "todo",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Security-Driver",
         "Xdows-Security"
@@ -1357,28 +1357,84 @@
         {
           "id": "B11.1",
           "title": "实现驱动随机 token 生成和一次性回传",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverShutdownToken.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B11.2",
           "title": "实现内核 SHA-256 哈希保存和常量时间比较",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverShutdownToken.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B11.3",
           "title": "实现停止/卸载/解除保护 IOCTL 的 token 校验",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverShutdownToken.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B11.4",
           "title": "主程序仅在内存中保存 token 并在自愿退出时提交",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverShutdownToken.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         }
-      ]
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.h",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverShutdownToken.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+        "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+      ],
+      "lastUpdatedAt": "2026-06-10",
+      "lastUpdatedBy": "Codex",
+      "notes": "驱动初始化生成 32 字节随机 token，注册响应仅回传一次；内核仅保存 SHA-256，授权关闭/解除自保护必须提交 token 并通过常量时间比较，成功后清理 token 和连接状态。"
     },
     {
       "id": "B12",
@@ -1819,14 +1875,14 @@
   "lastCheckpoint": {
     "lastUpdatedAt": "2026-06-10",
     "lastUpdatedBy": "Codex",
-    "summary": "完成 B10 防注入防护。",
+    "summary": "完成 B11 关闭驱动 token 与授权控制。",
     "evidence": [
-      "InjectionProtect.c implements process/thread Ob callbacks and image-load notify",
-      "Main app Debug x64 build passed",
-      "Driver build blocked by missing Microsoft.Cpp.Default.props"
+      "TokenAuth.c/h implement random token and SHA-256 validation",
+      "Queue.c handles register protected process, voluntary exit, authorized shutdown IOCTLs",
+      "Main app Debug x64 build passed"
     ],
     "next": [
-      "Continue B11 shutdown token authorization"
+      "Continue B12 ETW removal and compatibility policy"
     ]
   }
 }
