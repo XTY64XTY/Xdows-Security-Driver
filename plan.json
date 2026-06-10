@@ -55,8 +55,8 @@
   },
   "progressSummary": {
     "overallStatus": "in_progress",
-    "nextRecommendedBlockId": "B07",
-    "implementedBlockCount": 6,
+    "nextRecommendedBlockId": "B08",
+    "implementedBlockCount": 7,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
     "notes": "B01 verified；B02/B03/B05/B06 implemented；B04 native ABI remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed after B06-B13 work; driver build blocked by missing Microsoft.Cpp.Default.props."
@@ -891,8 +891,8 @@
     {
       "id": "B07",
       "title": "拦截窗口回调与用户决策",
-      "status": "todo",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Security"
       ],
@@ -921,28 +921,74 @@
         {
           "id": "B07.1",
           "title": "定义统一 InterceptRequest/InterceptDecision 模型",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverDecisionService.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B07.2",
           "title": "扩展拦截窗口支持进程、文件、注入和自保护事件",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverDecisionService.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B07.3",
           "title": "实现 UI 调度、队列、超时和取消",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverDecisionService.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B07.4",
           "title": "将用户决策写回驱动并记录日志",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverDecisionService.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         }
-      ]
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security\\Protection\\DriverDecisionService.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\InterceptWindow.xaml.cs",
+        "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+      ],
+      "lastUpdatedAt": "2026-06-10",
+      "lastUpdatedBy": "Codex",
+      "notes": "统一拦截请求/用户决策已接入驱动事件泵，拦截窗口展示类型、检测名、操作进程和 correlationId；UI 决策串行化并支持超时。"
     },
     {
       "id": "B08",
@@ -1628,14 +1674,14 @@
   "lastCheckpoint": {
     "lastUpdatedAt": "2026-06-10",
     "lastUpdatedBy": "Codex",
-    "summary": "完成 B06 文件 minifilter 拦截路径。",
+    "summary": "完成 B07 拦截窗口回调与用户决策。",
     "evidence": [
-      "B06 FileProtect.c/h and INF/vcxproj updated",
-      "Driver build blocked: Microsoft.Cpp.Default.props missing"
+      "DriverDecisionService queues UI decisions with timeout",
+      "InterceptWindow displays driver event context",
+      "Main app Debug x64 build passed"
     ],
     "next": [
-      "Continue B07 user decision callback",
-      "Install Visual Studio C++/WDK targets before driver build verification"
+      "Continue B08 signer trust and actor process secondary scan"
     ]
   }
 }
