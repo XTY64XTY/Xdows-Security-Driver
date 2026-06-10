@@ -4,8 +4,8 @@
 
 [Version]
 Signature   = "$WINDOWS NT$"
-Class       = System
-ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Class       = "ActivityMonitor"
+ClassGuid   = {b86dff51-a31e-4bac-b3cf-e8cfe75c9fc2}
 Provider    = %ManufacturerName%
 CatalogFile = Xdows-Security-Driver.cat
 DriverVer   = 06/09/2026,1.0.0.0
@@ -32,6 +32,7 @@ Xdows-Security-Driver.sys  = 1,,
 
 [Xdows-Security-Driver_Device.NT]
 CopyFiles = File_Copy
+AddReg = Xdows-Security-Driver.AddRegistry
 
 [File_Copy]
 Xdows-Security-Driver.sys
@@ -43,10 +44,17 @@ AddService = Xdows-Security-Driver,%SPSVCINST_ASSOCSERVICE%, Xdows-Security-Driv
 ; -------------- Xdows-Security-Driver driver install sections
 [Xdows-Security-Driver_Service_Inst]
 DisplayName    = %Xdows-Security-Driver.SVCDESC%
-ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+ServiceType    = 2               ; SERVICE_FILE_SYSTEM_DRIVER
 StartType      = 3               ; SERVICE_DEMAND_START
 ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
 ServiceBinary  = %13%\Xdows-Security-Driver.sys
+LoadOrderGroup = "FSFilter Activity Monitor"
+Dependencies   = FltMgr
+
+[Xdows-Security-Driver.AddRegistry]
+HKR,"Instances","DefaultInstance",0x00000000,%DefaultInstance%
+HKR,"Instances\%DefaultInstance%","Altitude",0x00000000,%Altitude%
+HKR,"Instances\%DefaultInstance%","Flags",0x00010001,0
 
 [Xdows-Security-Driver_Device.NT.Wdf]
 KmdfService = Xdows-Security-Driver, Xdows-Security-Driver_wdfsect
@@ -60,3 +68,5 @@ ManufacturerName = "Xigua Studio"
 DiskName = "Xdows-Security-Driver Installation Disk"
 Xdows-Security-Driver.DeviceDesc = "Xdows Security Protection Driver"
 Xdows-Security-Driver.SVCDESC = "Xdows Security Protection Driver"
+DefaultInstance = "Xdows Security Protection Instance"
+Altitude = "370030"

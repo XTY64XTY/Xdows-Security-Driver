@@ -55,11 +55,11 @@
   },
   "progressSummary": {
     "overallStatus": "in_progress",
-    "nextRecommendedBlockId": "B04.2",
-    "implementedBlockCount": 5,
+    "nextRecommendedBlockId": "B07",
+    "implementedBlockCount": 6,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
-    "notes": "B01 verified；B02/B03/B05 implemented；B04 native ABI implemented but full ONNX Runtime C/C++ inference/native build is blocked by missing VC targets/ORT headers. Main app Debug x64 build passed."
+    "notes": "B01 verified；B02/B03/B05/B06 implemented；B04 native ABI remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed after B06-B13 work; driver build blocked by missing Microsoft.Cpp.Default.props."
   },
   "globalCommands": [
     {
@@ -762,8 +762,8 @@
     {
       "id": "B06",
       "title": "文件创建、修改、更名拦截与扫描",
-      "status": "todo",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Security-Driver",
         "Xdows-Security"
@@ -796,40 +796,97 @@
         {
           "id": "B06.1",
           "title": "将驱动项目扩展为包含 FltMgr/minifilter 回调",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B06.2",
           "title": "捕获 IRP_MJ_CREATE 并处理创建/打开策略",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B06.3",
           "title": "捕获写入后的 cleanup/close 扫描点",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B06.4",
           "title": "捕获 IRP_MJ_SET_INFORMATION 的 rename 场景",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B06.5",
           "title": "实现文件路径规范化、扩展名/大小过滤和缓存",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B06.6",
           "title": "根据用户决策执行放行、拒绝、隔离或回滚",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         }
-      ]
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
+        "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+      ],
+      "lastUpdatedAt": "2026-06-10",
+      "lastUpdatedBy": "Codex",
+      "notes": "minifilter 文件创建、写入清理、重命名事件已接入统一待决事件/决策通道；本机缺 VS C++/WDK targets，驱动构建仍为环境阻塞。"
     },
     {
       "id": "B07",
@@ -1569,19 +1626,16 @@
     }
   ],
   "lastCheckpoint": {
-    "lastUpdatedAt": "2026-06-09",
+    "lastUpdatedAt": "2026-06-10",
     "lastUpdatedBy": "Codex",
-    "summary": "完成 B01-B05 的文档、驱动协议/模块骨架、用户态桥接、原生模型 ABI 和进程创建拦截代码；主程序构建通过。",
+    "summary": "完成 B06 文件 minifilter 拦截路径。",
     "evidence": [
-      "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 0 warnings/0 errors",
-      "dotnet build D:\\Code\\Xdows-Model\\Xdows-Model-Invoker\\Xdows-Model-Invoker.csproj -c Debug passed",
-      "dotnet msbuild driver failed because VCTargetsPath/Microsoft.Cpp.Default.props is unavailable",
-      "dotnet build model solution failed only on native vcxproj because VCTargetsPath/Microsoft.Cpp.Default.props is unavailable"
+      "B06 FileProtect.c/h and INF/vcxproj updated",
+      "Driver build blocked: Microsoft.Cpp.Default.props missing"
     ],
     "next": [
-      "Install/locate Visual Studio MSBuild C++ targets and WDK, then run cmd.build-driver-debug-x64",
-      "Add ONNX Runtime C/C++ headers/libs to Xdows-Model-Native and replace heuristic shell with true ORT inference",
-      "After B04.2 is unblocked, run process interception E2E and continue B06"
+      "Continue B07 user decision callback",
+      "Install Visual Studio C++/WDK targets before driver build verification"
     ]
   }
 }
