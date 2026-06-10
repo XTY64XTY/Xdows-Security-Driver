@@ -55,8 +55,8 @@
   },
   "progressSummary": {
     "overallStatus": "in_progress",
-    "nextRecommendedBlockId": "B10",
-    "implementedBlockCount": 9,
+    "nextRecommendedBlockId": "B11",
+    "implementedBlockCount": 10,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
     "notes": "B01 verified；B02/B03/B05/B06 implemented；B04 native ABI remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed after B06-B13 work; driver build blocked by missing Microsoft.Cpp.Default.props."
@@ -1212,8 +1212,8 @@
     {
       "id": "B10",
       "title": "防注入防护",
-      "status": "todo",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Security-Driver",
         "Xdows-Security"
@@ -1245,34 +1245,83 @@
         {
           "id": "B10.1",
           "title": "定义危险句柄权限矩阵和注入事件模型",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B10.2",
           "title": "在 Ob 回调中剥离未授权危险进程权限",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B10.3",
           "title": "在 Ob 回调中剥离未授权危险线程权限",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B10.4",
           "title": "加入映像/DLL 加载检测、日志和后续处置提示",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B10.5",
           "title": "实现用户同意后的临时策略缓存与撤销",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         }
-      ]
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+        "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+        "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+      ],
+      "lastUpdatedAt": "2026-06-10",
+      "lastUpdatedBy": "Codex",
+      "notes": "注入防护定义危险进程/线程权限矩阵，在 Ob 回调中对未授权危险权限做用户决策或剥离，并注册映像加载事件用于 DLL/映像加载检测；允许结果由用户态 TTL 缓存。"
     },
     {
       "id": "B11",
@@ -1770,14 +1819,14 @@
   "lastCheckpoint": {
     "lastUpdatedAt": "2026-06-10",
     "lastUpdatedBy": "Codex",
-    "summary": "完成 B09 主进程自保护。",
+    "summary": "完成 B10 防注入防护。",
     "evidence": [
-      "SelfProtect.c/h implement process/thread Ob callbacks",
-      "MainWindow voluntary exit path updated",
-      "Main app Debug x64 build passed"
+      "InjectionProtect.c implements process/thread Ob callbacks and image-load notify",
+      "Main app Debug x64 build passed",
+      "Driver build blocked by missing Microsoft.Cpp.Default.props"
     ],
     "next": [
-      "Continue B10 injection protection"
+      "Continue B11 shutdown token authorization"
     ]
   }
 }
