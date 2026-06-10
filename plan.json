@@ -55,8 +55,8 @@
   },
   "progressSummary": {
     "overallStatus": "in_progress",
-    "nextRecommendedBlockId": "B08",
-    "implementedBlockCount": 7,
+    "nextRecommendedBlockId": "B09",
+    "implementedBlockCount": 8,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
     "notes": "B01 verified；B02/B03/B05/B06 implemented；B04 native ABI remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed after B06-B13 work; driver build blocked by missing Microsoft.Cpp.Default.props."
@@ -993,8 +993,8 @@
     {
       "id": "B08",
       "title": "操作进程信任证书与二次扫描",
-      "status": "todo",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Security",
         "Xdows-Security-Driver"
@@ -1025,28 +1025,69 @@
         {
           "id": "B08.1",
           "title": "实现操作进程路径采集和用户态解析",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+            "D:\\Code\\Xdows-Security\\Protection\\SignerTrustService.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B08.2",
           "title": "实现 Authenticode/证书链/信任列表校验",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+            "D:\\Code\\Xdows-Security\\Protection\\SignerTrustService.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B08.3",
           "title": "威胁事件中对不可信操作进程执行二次模型扫描",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+            "D:\\Code\\Xdows-Security\\Protection\\SignerTrustService.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B08.4",
           "title": "把二次扫描结果合并到拦截窗口和日志",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+            "D:\\Code\\Xdows-Security\\Protection\\SignerTrustService.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         }
-      ]
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+        "D:\\Code\\Xdows-Security\\Protection\\SignerTrustService.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+        "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+      ],
+      "lastUpdatedAt": "2026-06-10",
+      "lastUpdatedBy": "Codex",
+      "notes": "协议扩展 actor image path，用户态解析操作进程路径、校验信任列表/Authenticode 证书链，并在目标威胁且操作进程不可信时执行二次模型扫描。"
     },
     {
       "id": "B09",
@@ -1674,14 +1715,14 @@
   "lastCheckpoint": {
     "lastUpdatedAt": "2026-06-10",
     "lastUpdatedBy": "Codex",
-    "summary": "完成 B07 拦截窗口回调与用户决策。",
+    "summary": "完成 B08 操作进程信任证书与二次扫描。",
     "evidence": [
-      "DriverDecisionService queues UI decisions with timeout",
-      "InterceptWindow displays driver event context",
-      "Main app Debug x64 build passed"
+      "Public.h event actor image path field",
+      "SignerTrustService evaluates trust and Authenticode chain",
+      "DriverProtection merges actor scan into user decision"
     ],
     "next": [
-      "Continue B08 signer trust and actor process secondary scan"
+      "Continue B09 self-protection registration and voluntary exit"
     ]
   }
 }
