@@ -55,8 +55,8 @@
   },
   "progressSummary": {
     "overallStatus": "in_progress",
-    "nextRecommendedBlockId": "B12",
-    "implementedBlockCount": 11,
+    "nextRecommendedBlockId": "B13",
+    "implementedBlockCount": 12,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
     "notes": "B01 verified；B02/B03/B05/B06 implemented；B04 native ABI remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed after B06-B13 work; driver build blocked by missing Microsoft.Cpp.Default.props."
@@ -1439,8 +1439,8 @@
     {
       "id": "B12",
       "title": "删除 ETW 监控与兼容模式强制策略",
-      "status": "todo",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Security"
       ],
@@ -1473,28 +1473,84 @@
         {
           "id": "B12.1",
           "title": "移除 ETW 实时防护类和 ProtectionStatus 映射",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\Protection.csproj",
+            "D:\\Code\\Xdows-Security\\Protection\\ETW.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWProcess.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWFiles.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWRegistry.cs deleted",
+            "rg 'TraceEvent|ETWProcess|ETWFiles|ETWRegistry|EnableKernelProvider|Microsoft.Diagnostics.Tracing' D:\\Code\\Xdows-Security returned no matches",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B12.2",
           "title": "移除 TraceEvent NuGet 包和相关 using/引用",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\Protection.csproj",
+            "D:\\Code\\Xdows-Security\\Protection\\ETW.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWProcess.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWFiles.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWRegistry.cs deleted",
+            "rg 'TraceEvent|ETWProcess|ETWFiles|ETWRegistry|EnableKernelProvider|Microsoft.Diagnostics.Tracing' D:\\Code\\Xdows-Security returned no matches",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B12.3",
           "title": "保留 LegacyProcess/LegacyFiles 作为兼容模式 fallback，并强制开启对应子项",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\Protection.csproj",
+            "D:\\Code\\Xdows-Security\\Protection\\ETW.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWProcess.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWFiles.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWRegistry.cs deleted",
+            "rg 'TraceEvent|ETWProcess|ETWFiles|ETWRegistry|EnableKernelProvider|Microsoft.Diagnostics.Tracing' D:\\Code\\Xdows-Security returned no matches",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B12.4",
           "title": "更新状态刷新逻辑，使用驱动状态替代 ETW 状态",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\Protection.csproj",
+            "D:\\Code\\Xdows-Security\\Protection\\ETW.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWProcess.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWFiles.cs deleted",
+            "D:\\Code\\Xdows-Security\\Protection\\ETWRegistry.cs deleted",
+            "rg 'TraceEvent|ETWProcess|ETWFiles|ETWRegistry|EnableKernelProvider|Microsoft.Diagnostics.Tracing' D:\\Code\\Xdows-Security returned no matches",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+          ],
+          "lastUpdatedAt": "2026-06-10",
+          "lastUpdatedBy": "Codex"
         }
-      ]
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security\\Protection\\Protection.csproj",
+        "D:\\Code\\Xdows-Security\\Protection\\ETW.cs deleted",
+        "D:\\Code\\Xdows-Security\\Protection\\ETWProcess.cs deleted",
+        "D:\\Code\\Xdows-Security\\Protection\\ETWFiles.cs deleted",
+        "D:\\Code\\Xdows-Security\\Protection\\ETWRegistry.cs deleted",
+        "rg 'TraceEvent|ETWProcess|ETWFiles|ETWRegistry|EnableKernelProvider|Microsoft.Diagnostics.Tracing' D:\\Code\\Xdows-Security returned no matches",
+        "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+      ],
+      "lastUpdatedAt": "2026-06-10",
+      "lastUpdatedBy": "Codex",
+      "notes": "TraceEvent 包和 ETW 实时防护类已移除；ProtectionStatus 改为驱动优先，LegacyProcess/LegacyFiles 仅作为兼容 fallback，兼容模式强制开启且禁用手动关闭。"
     },
     {
       "id": "B13",
@@ -1875,14 +1931,15 @@
   "lastCheckpoint": {
     "lastUpdatedAt": "2026-06-10",
     "lastUpdatedBy": "Codex",
-    "summary": "完成 B11 关闭驱动 token 与授权控制。",
+    "summary": "完成 B12 删除 ETW 监控与兼容模式强制策略。",
     "evidence": [
-      "TokenAuth.c/h implement random token and SHA-256 validation",
-      "Queue.c handles register protected process, voluntary exit, authorized shutdown IOCTLs",
+      "ETW*.cs deleted",
+      "TraceEvent package removed",
+      "rg ETW/TraceEvent realtime search returned no matches",
       "Main app Debug x64 build passed"
     ],
     "next": [
-      "Continue B12 ETW removal and compatibility policy"
+      "Continue B13 Settings protection UI"
     ]
   }
 }
