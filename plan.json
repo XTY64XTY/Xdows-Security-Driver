@@ -56,10 +56,10 @@
   "progressSummary": {
     "overallStatus": "in_progress",
     "nextRecommendedBlockId": "B16",
-    "implementedBlockCount": 15,
+    "implementedBlockCount": 16,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
-    "notes": "B01 verified；B02/B03/B05-B15 implemented；B04 native ABI skeleton committed and Debug x64 model build passes with VS2026 v145; full ONNX Runtime C/C++ integration still awaits ORT headers/libs. Main app Debug x64 build passed. VS2026 C++ targets, Windows SDK 28000, and WDK 28000 are installed; driver Debug x64 builds with SignMode=Off. Default TestSign still needs a usable test-signing certificate private key."
+    "notes": "B01 verified；B02-B15 implemented；B04 native C++ ONNX Runtime inference now builds and smoke-tests with Standard/Flash/Pro modes. Main app Debug x64 build passed. VS2026 C++ targets, Windows SDK 28000, and WDK 28000 are installed; driver Debug x64 builds with SignMode=Off. B16 will use test signing only."
   },
   "globalCommands": [
     {
@@ -553,8 +553,8 @@
     {
       "id": "B04",
       "title": "Xdows Model 原生 C++ 接入",
-      "status": "blocked",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Model",
         "Xdows-Security"
@@ -597,28 +597,33 @@
         {
           "id": "B04.2",
           "title": "用 ONNX Runtime C/C++ API 加载模型和执行推理",
-          "status": "blocked",
-          "implemented": false,
+          "status": "implemented",
+          "implemented": true,
           "evidence": [
             "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\src\\xdows_model_native.cpp",
-            "dotnet build D:\\Code\\Xdows-Model\\Xdows-Model.slnx -c Debug -p:Platform=x64 failed: VCTargetsPath unavailable"
+            "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\Xdows-Model-Native.vcxproj",
+            "D:\\NuGetPackages\\microsoft.ml.onnxruntime\\1.26.0\\build\\native\\include\\onnxruntime_cxx_api.h",
+            "VS2026 MSBuild model Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Model\\Xdows-Model.slnx /p:Configuration=Debug /p:Platform=x64",
+            "Native P/Invoke smoke test passed: Standard/Flash/Pro init and scan returned status 0"
           ],
-          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedAt": "2026-06-11",
           "lastUpdatedBy": "Codex",
-          "notes": "C ABI scanner currently validates model file and uses native heuristic scan shell；true ONNX Runtime C/C++ inference still needs ORT headers/libs and VC targets。"
+          "notes": "Native DLL now links ONNX Runtime C++ API, loads the selected ONNX model, builds Features/Label tensors, runs Probability.output, and copies onnxruntime runtime DLLs to native output."
         },
         {
           "id": "B04.3",
           "title": "移植或共享 FeatureExtractor 逻辑并建立一致性测试",
-          "status": "in_progress",
-          "implemented": false,
+          "status": "implemented",
+          "implemented": true,
           "evidence": [
             "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\src\\xdows_model_native.cpp",
-            "D:\\Code\\Xdows-Model\\Xdows-Model-Invoker\\FeatureExtractor.cs"
+            "D:\\Code\\Xdows-Model\\Xdows-Model-Invoker\\FeatureExtractor.cs",
+            "Native feature counts implemented: Standard=299, Flash=68, ProHybrid=1935",
+            "Native P/Invoke smoke test passed: Standard probability 55.39, Flash probability 58.50, Pro probability 63.87 on Xdows-Model-Caller.exe"
           ],
-          "lastUpdatedAt": "2026-06-09",
+          "lastUpdatedAt": "2026-06-11",
           "lastUpdatedBy": "Codex",
-          "notes": "Native scanner includes PE/entropy/string heuristic shell；full FeatureExtractor parity test remains pending。"
+          "notes": "Native scanner ports the shared byte statistics, PE header fields, Flash region features, Pro raw byte windows, and Pro structural features used by the managed invoker."
         },
         {
           "id": "B04.4",
@@ -649,11 +654,12 @@
         "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\include\\xdows_model_native.h",
         "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\src\\xdows_model_native.cpp",
         "D:\\Code\\Xdows-Security\\Protection\\NativeModelScanner.cs",
-        "VS2026 MSBuild model Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Model\\Xdows-Model.slnx /p:Configuration=Debug /p:Platform=x64"
+        "VS2026 MSBuild model Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Model\\Xdows-Model.slnx /p:Configuration=Debug /p:Platform=x64",
+        "Native P/Invoke smoke test passed: Standard/Flash/Pro init and scan returned status 0"
       ],
-      "lastUpdatedAt": "2026-06-09",
+      "lastUpdatedAt": "2026-06-11",
       "lastUpdatedBy": "Codex",
-      "notes": "原生 C ABI、项目和主程序封装已落地；完整 ONNX Runtime C/C++ 推理实现和 native 构建验证被 C++ targets/ORT headers 不可用阻塞。当前 NativeModelScanner 可降级为托管 ModelInvoker，不启动 Caller。"
+      "notes": "原生 C ABI、ONNX Runtime C++ 推理、Standard/Flash/Pro 特征提取和主程序 NativeModelScanner 封装已落地；保护路径不启动 Xdows-Model-Caller，native 不可用时仍可降级到托管 ModelInvoker。"
     },
     {
       "id": "B05",
