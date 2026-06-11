@@ -55,11 +55,11 @@
   },
   "progressSummary": {
     "overallStatus": "in_progress",
-    "nextRecommendedBlockId": "B15",
-    "implementedBlockCount": 14,
+    "nextRecommendedBlockId": "B16",
+    "implementedBlockCount": 15,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
-    "notes": "B01 verified；B02/B03/B05-B14 implemented；B04 native ABI remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed. Driver build remains blocked on this machine because Microsoft.Cpp.Default.props / VS C++ WDK targets are missing."
+    "notes": "B01 verified；B02/B03/B05-B15 implemented；B04 native ABI skeleton committed but full native build remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed. Driver build remains blocked on this machine because Microsoft.Cpp.Default.props / VS C++ WDK targets are missing."
   },
   "globalCommands": [
     {
@@ -1800,8 +1800,8 @@
     {
       "id": "B15",
       "title": "日志、事件流与主程序显示",
-      "status": "todo",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Security-Driver",
         "Xdows-Security"
@@ -1833,28 +1833,129 @@
         {
           "id": "B15.1",
           "title": "定义驱动日志事件结构和严重级别",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtocol.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-11",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B15.2",
           "title": "实现驱动日志缓冲和用户态拉取接口",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtocol.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-11",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B15.3",
           "title": "桥接到 LogService/LogStorage 并显示",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtocol.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-11",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B15.4",
           "title": "为所有拦截事件添加 correlationId",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtocol.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
+            "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+          ],
+          "lastUpdatedAt": "2026-06-11",
+          "lastUpdatedBy": "Codex"
         }
-      ]
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.h",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtocol.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
+        "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+        "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+      ],
+      "lastUpdatedAt": "2026-06-11",
+      "lastUpdatedBy": "Codex",
+      "notes": "驱动侧新增日志事件结构、严重级别、环形缓冲和 GET_NEXT_LOG IOCTL；进程、文件、注入、自保护、token、队列等路径写入 eventId/correlationId/module/severity/timestamp/message；主程序桥接轮询驱动日志并写入 LogService/主页日志显示，未记录关闭 token 明文。"
     },
     {
       "id": "B16",
@@ -2047,19 +2148,29 @@
     }
   ],
   "lastCheckpoint": {
-    "lastUpdatedAt": "2026-06-10",
+    "lastUpdatedAt": "2026-06-11",
     "lastUpdatedBy": "Codex",
-    "summary": "完成 B14：驱动环境检测与自动修复对话框。",
+    "summary": "完成 B15：驱动日志、事件流与主程序显示。",
     "evidence": [
-      "D:\\Code\\Xdows-Security\\Protection\\DriverEnvironmentChecker.cs",
-      "D:\\Code\\Xdows-Security\\Protection\\DriverInstaller.cs",
-      "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml",
-      "D:\\Code\\Xdows-Security\\Xdows-Security\\Dialog\\DriverEnvironmentDialog.xaml.cs",
-      "D:\\Code\\Xdows-Security\\Xdows-Security\\Views\\SettingsPage.xaml.cs",
-      "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.c",
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Log.h",
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.c",
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\TokenAuth.c",
+      "D:\\Code\\Xdows-Security\\Protection\\DriverProtocol.cs",
+      "D:\\Code\\Xdows-Security\\Protection\\DriverBridgeClient.cs",
+      "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+      "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
+      "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
+      "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
     ],
     "next": [
-      "B15: implement driver log ring buffer, pull IOCTL, and main app log display bridge",
+      "B16: implement driver packaging, signing, install, upgrade, and publish output integration",
       "Install Visual Studio C++ build tools and WDK targets, then run cmd.build-driver-debug-x64",
       "Resolve B04 ONNX Runtime native C/C++ integration when ORT headers/libs and C++ targets are available"
     ]

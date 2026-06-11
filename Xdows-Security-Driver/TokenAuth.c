@@ -82,6 +82,9 @@ XdowsTokenAuthInitialize(
 
     if (NT_SUCCESS(status)) {
         g_TokenReady = TRUE;
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Shutdown token initialized.");
+    } else {
+        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"TokenAuth", L"Shutdown token initialization failed", status);
     }
 
     return status;
@@ -113,6 +116,7 @@ XdowsTokenAuthCopyOneTimeToken(
     RtlStringCchCopyW(Token, TokenChars, g_Token);
     g_TokenReturned = TRUE;
     RtlSecureZeroMemory(g_Token, sizeof(g_Token));
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Shutdown token returned to registered client.");
     return STATUS_SUCCESS;
 }
 
@@ -158,4 +162,5 @@ XdowsTokenAuthInvalidate(
     RtlSecureZeroMemory(g_TokenHash, sizeof(g_TokenHash));
     g_TokenReady = FALSE;
     g_TokenReturned = FALSE;
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Shutdown token invalidated.");
 }

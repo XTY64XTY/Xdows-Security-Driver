@@ -204,7 +204,23 @@ Return Value:
         information = sizeof(*output);
         break;
     }
+    case IOCTL_XDOWS_SECURITY_GET_NEXT_LOG:
+    {
+        PXDOWS_SECURITY_LOG_ENTRY output;
+
+        status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*output), (PVOID*)&output, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = XdowsLogGetNext(output);
+        if (NT_SUCCESS(status)) {
+            information = sizeof(*output);
+        }
+        break;
+    }
     case IOCTL_XDOWS_SECURITY_DISCONNECT_CLIENT:
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client disconnected.");
         XdowsDisconnectClient();
         status = STATUS_SUCCESS;
         break;
@@ -260,10 +276,12 @@ Return Value:
         }
 
         if (!XdowsTokenAuthValidate(input->ShutdownToken)) {
+            XdowsLogWrite(XdowsSecurityLogWarning, 0, 0, L"TokenAuth", L"Authorized shutdown denied.");
             status = STATUS_ACCESS_DENIED;
             break;
         }
 
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Authorized shutdown accepted.");
         XdowsSelfProtectClearRegistration();
         XdowsTokenAuthInvalidate();
         XdowsDisconnectClient();

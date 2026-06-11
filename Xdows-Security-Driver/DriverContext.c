@@ -12,6 +12,7 @@ Abstract:
 
 #include "driver.h"
 #include "tokenauth.h"
+#include <ntstrsafe.h>
 
 XDOWS_DRIVER_CONTEXT g_XdowsDriverContext;
 
@@ -129,6 +130,7 @@ XdowsRegisterClient(
     g_XdowsDriverContext.ClientProcessId = ULongToHandle(Request->ClientProcessId);
     KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
 
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client registered.");
     return STATUS_SUCCESS;
 }
 
@@ -143,6 +145,8 @@ XdowsDisconnectClient(
     g_XdowsDriverContext.ClientConnected = FALSE;
     g_XdowsDriverContext.ClientProcessId = NULL;
     KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client state cleared.");
 }
 
 NTSTATUS
@@ -210,9 +214,17 @@ XdowsSubmitDecision(
          entry = entry->Flink) {
         PXDOWS_PENDING_EVENT pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
         if (pending->Event.EventId == Decision->EventId) {
+            ULONGLONG eventId = pending->Event.EventId;
+            ULONGLONG correlationId = pending->Event.CorrelationId;
             RtlCopyMemory(&pending->Decision, Decision, sizeof(*Decision));
             KeSetEvent(&pending->DecisionEvent, IO_NO_INCREMENT, FALSE);
             KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+            XdowsLogWrite(
+                XdowsSecurityLogInfo,
+                eventId,
+                correlationId,
+                L"Decision",
+                L"User-mode decision submitted.");
             return STATUS_SUCCESS;
         }
     }
@@ -244,11 +256,13 @@ XdowsQueueEventAndWait(
     KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
     if (!g_XdowsDriverContext.ClientConnected) {
         KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+        XdowsLogWrite(XdowsSecurityLogWarning, Event->EventId, Event->CorrelationId, L"Queue", L"Event dropped because client is not connected.");
         return STATUS_DEVICE_NOT_CONNECTED;
     }
     if (g_XdowsDriverContext.PendingEventCount >= XDOWS_SECURITY_MAX_PENDING_EVENTS) {
         g_XdowsDriverContext.DroppedEventCount++;
         KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+        XdowsLogWrite(XdowsSecurityLogWarning, Event->EventId, Event->CorrelationId, L"Queue", L"Event dropped because pending queue is full.");
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
@@ -258,6 +272,7 @@ XdowsQueueEventAndWait(
         sizeof(*pending),
         'swDX');
     if (pending == NULL) {
+        XdowsLogWrite(XdowsSecurityLogError, Event->EventId, Event->CorrelationId, L"Queue", L"Event allocation failed.");
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
@@ -290,6 +305,7 @@ XdowsQueueEventAndWait(
 
     if (!linked) {
         ExFreePoolWithTag(pending, 'swDX');
+        XdowsLogWrite(XdowsSecurityLogWarning, Event->EventId, Event->CorrelationId, L"Queue", L"Event dropped before delivery.");
         return STATUS_DEVICE_NOT_CONNECTED;
     }
 
@@ -313,9 +329,22 @@ XdowsQueueEventAndWait(
 
     if (status == STATUS_SUCCESS) {
         RtlCopyMemory(Decision, &pending->Decision, sizeof(*Decision));
+        XdowsLogWrite(
+            XdowsSecurityLogInfo,
+            Event->EventId,
+            Event->CorrelationId,
+            L"Queue",
+            L"Event completed with user-mode decision.");
     } else {
         Decision->EventId = Event->EventId;
         Decision->Decision = XdowsSecurityDecisionTimeout;
+        XdowsLogWriteStatus(
+            XdowsSecurityLogWarning,
+            Event->EventId,
+            Event->CorrelationId,
+            L"Queue",
+            L"Event wait timed out",
+            status);
     }
 
     ExFreePoolWithTag(pending, 'swDX');

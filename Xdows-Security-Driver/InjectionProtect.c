@@ -43,7 +43,9 @@ XdowsInjectionAskUser(
     _In_ ULONG EventType,
     _In_ ULONG TargetProcessId,
     _In_ ULONG TargetThreadId,
-    _In_ ACCESS_MASK DesiredAccess
+    _In_ ACCESS_MASK DesiredAccess,
+    _Out_opt_ PULONGLONG EventId,
+    _Out_opt_ PULONGLONG CorrelationId
     )
 {
     XDOWS_SECURITY_EVENT event;
@@ -73,8 +75,22 @@ XdowsInjectionAskUser(
         L"desired-access=0x%08X",
         DesiredAccess);
 
+    if (EventId != NULL) {
+        *EventId = event.EventId;
+    }
+    if (CorrelationId != NULL) {
+        *CorrelationId = event.CorrelationId;
+    }
+
     status = XdowsQueueEventAndWait(&event, &decision);
     if (!NT_SUCCESS(status)) {
+        XdowsLogWriteStatus(
+            XdowsSecurityLogWarning,
+            event.EventId,
+            event.CorrelationId,
+            L"Injection",
+            L"Sensitive handle decision failed",
+            status);
         return FALSE;
     }
 
@@ -93,6 +109,8 @@ XdowsInjectionPreOperation(
     HANDLE targetProcessId;
     HANDLE targetThreadId = NULL;
     ULONG eventType;
+    ULONGLONG eventId = 0;
+    ULONGLONG correlationId = 0;
 
     UNREFERENCED_PARAMETER(RegistrationContext);
 
@@ -124,11 +142,19 @@ XdowsInjectionPreOperation(
         eventType,
         HandleToULong(targetProcessId),
         HandleToULong(targetThreadId),
-        (*desiredAccess) & dangerousMask)) {
+        (*desiredAccess) & dangerousMask,
+        &eventId,
+        &correlationId)) {
         return OB_PREOP_SUCCESS;
     }
 
     *desiredAccess &= ~dangerousMask;
+    XdowsLogWrite(
+        XdowsSecurityLogWarning,
+        eventId,
+        correlationId,
+        L"Injection",
+        L"Dangerous handle permissions stripped.");
     return OB_PREOP_SUCCESS;
 }
 
@@ -176,6 +202,15 @@ XdowsInjectionImageLoadNotify(
     }
 
     (VOID)XdowsQueueEventAndWait(&event, &decision);
+    if (decision.Decision == XdowsSecurityDecisionBlock ||
+        decision.Decision == XdowsSecurityDecisionTimeout) {
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            event.EventId,
+            event.CorrelationId,
+            L"Injection",
+            L"Image load event reported as blocked.");
+    }
 }
 
 NTSTATUS
@@ -211,12 +246,16 @@ XdowsInjectionProtectInitialize(
     status = ObRegisterCallbacks(&registration, &g_InjectionObRegistration);
     if (!NT_SUCCESS(status)) {
         g_InjectionObRegistration = NULL;
+        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"Injection", L"OB callback registration failed", status);
         return status;
     }
 
     status = PsSetLoadImageNotifyRoutine(XdowsInjectionImageLoadNotify);
     if (NT_SUCCESS(status)) {
         g_ImageLoadCallbackRegistered = TRUE;
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Injection", L"Injection callbacks registered.");
+    } else {
+        XdowsLogWriteStatus(XdowsSecurityLogWarning, 0, 0, L"Injection", L"Image load callback registration failed", status);
     }
 
     return STATUS_SUCCESS;
@@ -238,4 +277,6 @@ XdowsInjectionProtectShutdown(
     if (handle != NULL) {
         ObUnRegisterCallbacks(handle);
     }
+
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Injection", L"Injection callbacks unregistered.");
 }

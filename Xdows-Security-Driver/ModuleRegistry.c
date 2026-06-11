@@ -18,8 +18,8 @@ Abstract:
 #include "tokenauth.h"
 
 typedef enum _XDOWS_MODULE_INDEX {
-    XdowsModuleTokenAuth = 0,
-    XdowsModuleLog,
+    XdowsModuleLog = 0,
+    XdowsModuleTokenAuth,
     XdowsModuleProcess,
     XdowsModuleFile,
     XdowsModuleInjection,
@@ -47,17 +47,17 @@ XdowsModulesInitialize(
 
     RtlZeroMemory(g_ModuleStarted, sizeof(g_ModuleStarted));
 
-    status = XdowsTokenAuthInitialize();
-    if (!NT_SUCCESS(status)) {
-        goto Fail;
-    }
-    XdowsMarkStarted(XdowsModuleTokenAuth);
-
     status = XdowsLogInitialize();
     if (!NT_SUCCESS(status)) {
         goto Fail;
     }
     XdowsMarkStarted(XdowsModuleLog);
+
+    status = XdowsTokenAuthInitialize();
+    if (!NT_SUCCESS(status)) {
+        goto Fail;
+    }
+    XdowsMarkStarted(XdowsModuleTokenAuth);
 
     status = XdowsProcessProtectInitialize();
     if (!NT_SUCCESS(status)) {
@@ -115,13 +115,13 @@ XdowsModulesShutdown(
         g_ModuleStarted[XdowsModuleProcess] = FALSE;
     }
 
-    if (g_ModuleStarted[XdowsModuleLog]) {
-        XdowsLogShutdown();
-        g_ModuleStarted[XdowsModuleLog] = FALSE;
-    }
-
     if (g_ModuleStarted[XdowsModuleTokenAuth]) {
         XdowsTokenAuthShutdown();
         g_ModuleStarted[XdowsModuleTokenAuth] = FALSE;
+    }
+
+    if (g_ModuleStarted[XdowsModuleLog]) {
+        XdowsLogShutdown();
+        g_ModuleStarted[XdowsModuleLog] = FALSE;
     }
 }

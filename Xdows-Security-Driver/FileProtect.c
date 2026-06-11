@@ -177,6 +177,14 @@ XdowsFileProtectPreCreate(
     FltReleaseFileNameInformation(nameInfo);
 
     if (XdowsFileProtectShouldBlock(status, &decision)) {
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            decision.EventId != 0 ? decision.EventId : 0,
+            decision.EventId != 0 ? decision.EventId : 0,
+            L"File",
+            decision.Decision == XdowsSecurityDecisionTimeout
+                ? L"File create blocked after decision timeout."
+                : L"File create blocked by user-mode decision.");
         Data->IoStatus.Status = STATUS_ACCESS_DENIED;
         Data->IoStatus.Information = 0;
         return FLT_PREOP_COMPLETE;
@@ -238,6 +246,16 @@ XdowsFileProtectPostCleanup(
         requestorPid,
         &decision);
 
+    if (decision.Decision == XdowsSecurityDecisionBlock ||
+        decision.Decision == XdowsSecurityDecisionTimeout) {
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            decision.EventId,
+            decision.EventId,
+            L"File",
+            L"File write event reported as blocked after cleanup.");
+    }
+
     FltReleaseFileNameInformation(nameInfo);
     return FLT_POSTOP_FINISHED_PROCESSING;
 }
@@ -288,6 +306,14 @@ XdowsFileProtectPreSetInformation(
     FltReleaseFileNameInformation(nameInfo);
 
     if (XdowsFileProtectShouldBlock(status, &decision)) {
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            decision.EventId != 0 ? decision.EventId : 0,
+            decision.EventId != 0 ? decision.EventId : 0,
+            L"File",
+            decision.Decision == XdowsSecurityDecisionTimeout
+                ? L"File rename blocked after decision timeout."
+                : L"File rename blocked by user-mode decision.");
         Data->IoStatus.Status = STATUS_ACCESS_DENIED;
         Data->IoStatus.Information = 0;
         return FLT_PREOP_COMPLETE;
@@ -376,13 +402,17 @@ XdowsFileProtectInitialize(
     status = FltRegisterFilter(driverObject, &g_XdowsFilterRegistration, &g_XdowsFilter);
     if (!NT_SUCCESS(status)) {
         g_XdowsFilter = NULL;
+        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"File", L"Filter registration failed", status);
         return status;
     }
 
     status = FltStartFiltering(g_XdowsFilter);
     if (!NT_SUCCESS(status)) {
+        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"File", L"Filter start failed", status);
         FltUnregisterFilter(g_XdowsFilter);
         g_XdowsFilter = NULL;
+    } else {
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"File", L"File minifilter started.");
     }
 
     return status;
@@ -398,5 +428,6 @@ XdowsFileProtectShutdown(
 
     if (filter != NULL) {
         FltUnregisterFilter(filter);
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"File", L"File minifilter stopped.");
     }
 }

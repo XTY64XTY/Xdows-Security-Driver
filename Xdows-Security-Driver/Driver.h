@@ -22,6 +22,7 @@ Environment:
 
 #include "device.h"
 #include "drivercontext.h"
+#include "log.h"
 #include "moduleregistry.h"
 #include "processprotect.h"
 #include "queue.h"

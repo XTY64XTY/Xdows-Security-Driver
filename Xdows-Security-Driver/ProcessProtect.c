@@ -104,6 +104,14 @@ XdowsProcessNotifyRoutine(
 
     if (decision.Decision == XdowsSecurityDecisionBlock ||
         decision.Decision == XdowsSecurityDecisionTimeout) {
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            event.EventId,
+            event.CorrelationId,
+            L"Process",
+            decision.Decision == XdowsSecurityDecisionTimeout
+                ? L"Process creation blocked after decision timeout."
+                : L"Process creation blocked by user-mode decision.");
         CreateInfo->CreationStatus = STATUS_ACCESS_DENIED;
     }
 }
@@ -123,8 +131,10 @@ XdowsProcessProtectInitialize(
     if (NT_SUCCESS(status)) {
         g_ProcessCallbackRegistered = TRUE;
         g_XdowsDriverContext.ProcessProtectionEnabled = TRUE;
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Process", L"Process create callback registered.");
     } else {
         g_XdowsDriverContext.ProcessProtectionEnabled = FALSE;
+        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"Process", L"Process callback registration failed", status);
     }
 
     return status;
@@ -142,4 +152,5 @@ XdowsProcessProtectShutdown(
     PsSetCreateProcessNotifyRoutineEx(XdowsProcessNotifyRoutine, TRUE);
     g_ProcessCallbackRegistered = FALSE;
     g_XdowsDriverContext.ProcessProtectionEnabled = FALSE;
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Process", L"Process create callback unregistered.");
 }

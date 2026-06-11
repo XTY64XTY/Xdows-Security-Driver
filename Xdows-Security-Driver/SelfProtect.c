@@ -92,6 +92,7 @@ XdowsSelfProtectPreOperation(
     HANDLE targetProcessId = NULL;
     HANDLE currentProcessId = PsGetCurrentProcessId();
     BOOLEAN voluntaryExit = FALSE;
+    ACCESS_MASK originalAccess;
 
     UNREFERENCED_PARAMETER(RegistrationContext);
 
@@ -117,7 +118,16 @@ XdowsSelfProtectPreOperation(
         return OB_PREOP_SUCCESS;
     }
 
+    originalAccess = *desiredAccess;
     *desiredAccess &= ~maskToRemove;
+    if (*desiredAccess != originalAccess) {
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            0,
+            0,
+            L"SelfProtect",
+            L"Dangerous handle permissions stripped from protected process.");
+    }
     return OB_PREOP_SUCCESS;
 }
 
@@ -153,6 +163,9 @@ XdowsSelfProtectInitialize(
     status = ObRegisterCallbacks(&registration, &g_SelfProtectState.ObRegistrationHandle);
     if (!NT_SUCCESS(status)) {
         g_SelfProtectState.ObRegistrationHandle = NULL;
+        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"SelfProtect", L"Self-protect callback registration failed", status);
+    } else {
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect", L"Self-protect callbacks registered.");
     }
 
     return status;
@@ -168,6 +181,7 @@ XdowsSelfProtectShutdown(
 
     if (handle != NULL) {
         ObUnRegisterCallbacks(handle);
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect", L"Self-protect callbacks unregistered.");
     }
 
     XdowsSelfProtectClearRegistration();
@@ -194,6 +208,7 @@ XdowsSelfProtectRegisterProcess(
     g_SelfProtectState.VoluntaryExit = FALSE;
     KeReleaseSpinLock(&g_SelfProtectState.Lock, oldIrql);
 
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect", L"Protected process registered.");
     return STATUS_SUCCESS;
 }
 
@@ -213,6 +228,14 @@ XdowsSelfProtectSetVoluntaryExit(
     }
     KeReleaseSpinLock(&g_SelfProtectState.Lock, oldIrql);
 
+    if (NT_SUCCESS(status)) {
+        XdowsLogWrite(
+            XdowsSecurityLogInfo,
+            0,
+            0,
+            L"SelfProtect",
+            IsVoluntaryExit ? L"Voluntary exit enabled." : L"Voluntary exit disabled.");
+    }
     return status;
 }
 
@@ -228,4 +251,6 @@ XdowsSelfProtectClearRegistration(
     g_SelfProtectState.MainThreadId = NULL;
     g_SelfProtectState.VoluntaryExit = FALSE;
     KeReleaseSpinLock(&g_SelfProtectState.Lock, oldIrql);
+
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect", L"Protected process registration cleared.");
 }
