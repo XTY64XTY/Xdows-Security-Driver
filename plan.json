@@ -55,11 +55,11 @@
   },
   "progressSummary": {
     "overallStatus": "in_progress",
-    "nextRecommendedBlockId": "B16",
-    "implementedBlockCount": 16,
+    "nextRecommendedBlockId": "B17",
+    "implementedBlockCount": 17,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
-    "notes": "B01 verified；B02-B15 implemented；B04 native C++ ONNX Runtime inference now builds and smoke-tests with Standard/Flash/Pro modes. Main app Debug x64 build passed. VS2026 C++ targets, Windows SDK 28000, and WDK 28000 are installed; driver Debug x64 builds with SignMode=Off. B16 will use test signing only."
+    "notes": "B01 verified；B02-B16 implemented；B04 native C++ ONNX Runtime inference builds and smoke-tests with Standard/Flash/Pro modes. B16 uses test signing only: Build-TestSignedDriver.ps1 creates/reuses a test certificate, signs sys/cat, and main app output includes Driver, native model, ORT, and ONNX assets."
   },
   "globalCommands": [
     {
@@ -1966,8 +1966,8 @@
     {
       "id": "B16",
       "title": "驱动打包、签名、安装与发布",
-      "status": "todo",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Security-Driver",
         "Xdows-Security"
@@ -1998,28 +1998,71 @@
         {
           "id": "B16.1",
           "title": "完成开发测试签名和 catalog 生成流程",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\tools\\Build-TestSignedDriver.ps1",
+            "D:\\Code\\Xdows-Security-Driver\\x64\\Debug\\Xdows-Security-Driver\\Xdows-Security-Driver.sys",
+            "D:\\Code\\Xdows-Security-Driver\\x64\\Debug\\Xdows-Security-Driver\\xdows-security-driver.cat",
+            "D:\\Code\\Xdows-Security-Driver\\x64\\Debug\\Xdows-Security-Driver\\Xdows-Security-Driver-Test.cer",
+            "Build-TestSignedDriver.ps1 -Configuration Debug -Platform x64 passed; sys and cat signed with CN=Xdows Security Driver Test Certificate"
+          ],
+          "lastUpdatedAt": "2026-06-11",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B16.2",
           "title": "将驱动包纳入主程序发布输出",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\Protection.csproj",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\Xdows-Security.csproj",
+            "App output contains Driver\\Xdows-Security-Driver.inf/sys/cat/cer, Xdows-Model-Native.dll, onnxruntime.dll, onnxruntime_providers_shared.dll, and all three ONNX model files"
+          ],
+          "lastUpdatedAt": "2026-06-11",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B16.3",
           "title": "实现安装、升级、卸载和重启提示流程",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverEnvironmentChecker.cs",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverInstaller.cs",
+            "DriverInstaller stops a running service before install/upgrade, adds UninstallDriverAsync with pnputil /delete-driver /uninstall /force, and reports likely restart requirements"
+          ],
+          "lastUpdatedAt": "2026-06-11",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B16.4",
           "title": "记录正式签名和发布要求",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\docs\\driver-packaging-signing.md"
+          ],
+          "lastUpdatedAt": "2026-06-11",
+          "lastUpdatedBy": "Codex",
+          "notes": "Current scope is test signing only; production EV/attestation/HLK signing remains explicitly documented as out of scope."
         }
-      ]
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\tools\\Build-TestSignedDriver.ps1",
+        "D:\\Code\\Xdows-Security-Driver\\docs\\driver-packaging-signing.md",
+        "D:\\Code\\Xdows-Security\\Protection\\Protection.csproj",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\Xdows-Security.csproj",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverEnvironmentChecker.cs",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverInstaller.cs",
+        "Build-TestSignedDriver.ps1 -Configuration Debug -Platform x64 passed with signed sys and cat",
+        "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 0 warnings/0 errors",
+        "App output asset check passed for Driver package, native model DLL, ORT DLLs, and ONNX model files"
+      ],
+      "lastUpdatedAt": "2026-06-11",
+      "lastUpdatedBy": "Codex",
+      "notes": "B16 uses test signing only. Driver package generation and test signing are scripted; WinUI output includes driver and model runtime assets; installer helpers cover install/upgrade, service restart, uninstall, and likely reboot messaging."
     },
     {
       "id": "B17",
