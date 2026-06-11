@@ -267,8 +267,8 @@ XdowsQueueEventAndWait(
     }
     KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
 
-    pending = (PXDOWS_PENDING_EVENT)ExAllocatePoolWithTag(
-        NonPagedPoolNx,
+    pending = (PXDOWS_PENDING_EVENT)ExAllocatePool2(
+        POOL_FLAG_NON_PAGED,
         sizeof(*pending),
         'swDX');
     if (pending == NULL) {

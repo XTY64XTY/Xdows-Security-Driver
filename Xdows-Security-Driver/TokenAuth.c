@@ -1,4 +1,5 @@
 #include "driver.h"
+#include "tokenauth.h"
 #include <bcrypt.h>
 #include <ntstrsafe.h>
 

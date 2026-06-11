@@ -59,7 +59,7 @@
     "implementedBlockCount": 15,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
-    "notes": "B01 verified；B02/B03/B05-B15 implemented；B04 native ABI skeleton committed but full native build remains blocked by missing VC targets/ORT headers. Main app Debug x64 build passed. Driver build remains blocked on this machine because Microsoft.Cpp.Default.props / VS C++ WDK targets are missing."
+    "notes": "B01 verified；B02/B03/B05-B15 implemented；B04 native ABI skeleton committed and Debug x64 model build passes with VS2026 v145; full ONNX Runtime C/C++ integration still awaits ORT headers/libs. Main app Debug x64 build passed. VS2026 C++ targets, Windows SDK 28000, and WDK 28000 are installed; driver Debug x64 builds with SignMode=Off. Default TestSign still needs a usable test-signing certificate private key."
   },
   "globalCommands": [
     {
@@ -89,7 +89,7 @@
     {
       "id": "cmd.build-driver-debug-x64",
       "name": "构建驱动 Debug x64",
-      "command": "msbuild 'D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx' /p:Configuration=Debug /p:Platform=x64",
+      "command": "& 'D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe' 'D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx' /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off",
       "workingDirectory": "D:\\Code\\Xdows-Security-Driver",
       "requiresAdmin": false,
       "purpose": "验证驱动解决方案能构建。"
@@ -97,7 +97,7 @@
     {
       "id": "cmd.build-driver-release-x64",
       "name": "构建驱动 Release x64",
-      "command": "msbuild 'D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx' /p:Configuration=Release /p:Platform=x64",
+      "command": "& 'D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe' 'D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx' /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off",
       "workingDirectory": "D:\\Code\\Xdows-Security-Driver",
       "requiresAdmin": false,
       "purpose": "验证发布配置能构建。"
@@ -113,7 +113,7 @@
     {
       "id": "cmd.build-model",
       "name": "构建模型解决方案",
-      "command": "dotnet build 'D:\\Code\\Xdows-Model\\Xdows-Model.slnx' -c Debug",
+      "command": "& 'D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe' 'D:\\Code\\Xdows-Model\\Xdows-Model.slnx' /p:Configuration=Debug /p:Platform=x64",
       "workingDirectory": "D:\\Code\\Xdows-Model",
       "requiresAdmin": false,
       "purpose": "验证 Xdows Model 及新增原生项目。"
@@ -441,7 +441,7 @@
         "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
         "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ModuleRegistry.c",
         "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
-        "dotnet msbuild driver Debug x64 blocked: VCTargetsPath/Microsoft.Cpp.Default.props unavailable"
+        "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
       ],
       "lastUpdatedAt": "2026-06-09",
       "lastUpdatedBy": "Codex",
@@ -649,7 +649,7 @@
         "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\include\\xdows_model_native.h",
         "D:\\Code\\Xdows-Model\\Xdows-Model-Native\\src\\xdows_model_native.cpp",
         "D:\\Code\\Xdows-Security\\Protection\\NativeModelScanner.cs",
-        "dotnet build model solution blocked for native vcxproj: VCTargetsPath/Microsoft.Cpp.Default.props unavailable"
+        "VS2026 MSBuild model Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Model\\Xdows-Model.slnx /p:Configuration=Debug /p:Platform=x64"
       ],
       "lastUpdatedAt": "2026-06-09",
       "lastUpdatedBy": "Codex",
@@ -753,7 +753,7 @@
         "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
         "D:\\Code\\Xdows-Security\\Protection\\NativeModelScanner.cs",
         "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed",
-        "driver build verification blocked: VCTargetsPath/Microsoft.Cpp.Default.props unavailable"
+        "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
       ],
       "lastUpdatedAt": "2026-06-09",
       "lastUpdatedBy": "Codex",
@@ -802,7 +802,7 @@
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
@@ -816,7 +816,7 @@
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
@@ -830,7 +830,7 @@
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
@@ -844,7 +844,7 @@
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
@@ -858,7 +858,7 @@
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
@@ -872,7 +872,7 @@
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
@@ -882,7 +882,7 @@
         "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.c",
         "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\FileProtect.h",
         "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.inf",
-        "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+        "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
       ],
       "lastUpdatedAt": "2026-06-10",
       "lastUpdatedBy": "Codex",
@@ -1251,7 +1251,7 @@
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
             "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
             "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
@@ -1265,7 +1265,7 @@
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
             "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
             "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
@@ -1279,7 +1279,7 @@
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
             "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
             "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
@@ -1293,7 +1293,7 @@
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
             "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
             "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
@@ -1307,7 +1307,7 @@
             "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
             "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
             "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
@@ -1317,7 +1317,7 @@
         "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
         "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
         "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-        "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+        "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
       ],
       "lastUpdatedAt": "2026-06-10",
       "lastUpdatedBy": "Codex",
@@ -1851,7 +1851,7 @@
             "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
             "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
             "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-11",
           "lastUpdatedBy": "Codex"
@@ -1877,7 +1877,7 @@
             "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
             "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
             "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-11",
           "lastUpdatedBy": "Codex"
@@ -1903,7 +1903,7 @@
             "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
             "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
             "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-11",
           "lastUpdatedBy": "Codex"
@@ -1929,7 +1929,7 @@
             "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
             "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
             "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-            "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+            "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
           ],
           "lastUpdatedAt": "2026-06-11",
           "lastUpdatedBy": "Codex"
@@ -1951,7 +1951,7 @@
         "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
         "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
         "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-        "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+        "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
       ],
       "lastUpdatedAt": "2026-06-11",
       "lastUpdatedBy": "Codex",
@@ -2167,12 +2167,12 @@
       "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
       "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
       "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning",
-      "dotnet build D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx -c Debug -p:Platform=x64 blocked: Microsoft.Cpp.Default.props missing"
+      "VS2026 MSBuild driver Debug x64 passed: D:\\Visual-Studio\\MSBuild\\Current\\Bin\\amd64\\MSBuild.exe D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver.slnx /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.28000.0 /p:SignMode=Off"
     ],
     "next": [
       "B16: implement driver packaging, signing, install, upgrade, and publish output integration",
-      "Install Visual Studio C++ build tools and WDK targets, then run cmd.build-driver-debug-x64",
-      "Resolve B04 ONNX Runtime native C/C++ integration when ORT headers/libs and C++ targets are available"
+      "B16: fix TestSign certificate private-key usability, then run default signed driver build",
+      "Resolve B04 ONNX Runtime native C/C++ integration when ORT headers/libs are available"
     ]
   }
 }
