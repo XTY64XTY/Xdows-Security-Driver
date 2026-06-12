@@ -54,12 +54,12 @@
     }
   },
   "progressSummary": {
-    "overallStatus": "in_progress",
-    "nextRecommendedBlockId": "B18",
-    "implementedBlockCount": 18,
+    "overallStatus": "implemented",
+    "nextRecommendedBlockId": "manual-vm-verification",
+    "implementedBlockCount": 19,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
-    "notes": "B01 verified；B02-B17 implemented；B04 native C++ ONNX Runtime inference builds and smoke-tests with Standard/Flash/Pro modes. B16 uses test signing only. B17 adds local smoke tests and VM/Driver Verifier validation matrix; VM/admin tests are documented but not marked verified in this non-admin session."
+    "notes": "B01 verified；B02-B18 implemented；B04 native C++ ONNX Runtime inference builds and smoke-tests with Standard/Flash/Pro modes. B16 uses test signing only. B17 adds local smoke tests and VM/Driver Verifier validation matrix; VM/admin tests are documented but not marked verified in this non-admin session. B18 documents build, install, protocol, assets, troubleshooting, and maintenance flow across all three repositories."
   },
   "globalCommands": [
     {
@@ -2187,8 +2187,8 @@
     {
       "id": "B18",
       "title": "文档、交接与维护",
-      "status": "todo",
-      "implemented": false,
+      "status": "implemented",
+      "implemented": true,
       "ownerRepos": [
         "Xdows-Security-Driver",
         "Xdows-Security",
@@ -2222,35 +2222,81 @@
         {
           "id": "B18.1",
           "title": "更新驱动 README 和故障排查文档",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\README.md",
+            "D:\\Code\\Xdows-Security-Driver\\docs\\driver-packaging-signing.md"
+          ],
+          "lastUpdatedAt": "2026-06-12",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B18.2",
           "title": "记录协议版本和模块边界",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\docs\\protocol-and-maintenance.md",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtocol.cs"
+          ],
+          "lastUpdatedAt": "2026-06-12",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B18.3",
           "title": "补充主程序和模型项目相关说明",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\README.md",
+            "D:\\Code\\Xdows-Model\\README.md"
+          ],
+          "lastUpdatedAt": "2026-06-12",
+          "lastUpdatedBy": "Codex"
         },
         {
           "id": "B18.4",
           "title": "最终同步 plan.json 状态和证据",
-          "status": "todo",
-          "implemented": false
+          "status": "implemented",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\plan.json",
+            "cmd.validate-plan passed",
+            "cmd.todo-search returns no remaining todo/blocked/implemented false entries after B18 sync"
+          ],
+          "lastUpdatedAt": "2026-06-12",
+          "lastUpdatedBy": "Codex"
         }
-      ]
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\README.md",
+        "D:\\Code\\Xdows-Security-Driver\\docs\\protocol-and-maintenance.md",
+        "D:\\Code\\Xdows-Security\\README.md",
+        "D:\\Code\\Xdows-Model\\README.md",
+        "D:\\Code\\Xdows-Security-Driver\\plan.json",
+        "cmd.validate-plan passed",
+        "cmd.todo-search returns no remaining todo/blocked/implemented false entries",
+        "D:\\Code\\Xdows-Model\\tests\\Invoke-NativeConsistency.ps1 -SkipBuild passed",
+        "D:\\Code\\Xdows-Security\\tests\\Invoke-DriverBridgeProtocolSmoke.ps1 passed",
+        "D:\\Code\\Xdows-Security\\tests\\Invoke-PublishAssetSmoke.ps1 -SkipBuild passed",
+        "D:\\Code\\Xdows-Security-Driver\\tests\\Invoke-DriverPackageSmoke.ps1 -SkipBuild passed"
+      ],
+      "lastUpdatedAt": "2026-06-12",
+      "lastUpdatedBy": "Codex",
+      "notes": "B18 documents development prerequisites, test signing, app publish assets, protocol version rules, module boundaries, validation commands, troubleshooting, and safety boundaries across the driver, app, and model repos."
     }
   ],
   "lastCheckpoint": {
     "lastUpdatedAt": "2026-06-12",
     "lastUpdatedBy": "Codex",
-    "summary": "完成 B17：测试套件与验证矩阵。",
+    "summary": "完成 B18：文档、交接与维护；所有 blocks 已 implemented。",
     "evidence": [
+      "D:\\Code\\Xdows-Security-Driver\\README.md",
+      "D:\\Code\\Xdows-Security-Driver\\docs\\protocol-and-maintenance.md",
+      "D:\\Code\\Xdows-Security\\README.md",
+      "D:\\Code\\Xdows-Model\\README.md",
       "D:\\Code\\Xdows-Model\\tests\\Invoke-NativeConsistency.ps1",
       "D:\\Code\\Xdows-Security\\tests\\Invoke-DriverBridgeProtocolSmoke.ps1",
       "D:\\Code\\Xdows-Security\\tests\\Invoke-PublishAssetSmoke.ps1",
@@ -2262,8 +2308,8 @@
       "Invoke-DriverPackageSmoke.ps1 passed after test-signing Debug x64 package"
     ],
     "next": [
-      "B18: update README and maintenance documentation across driver, main app, and model repositories",
-      "B18: run final plan todo search and synchronize evidence"
+      "Run VM Driver Verifier, E2E, stress, and performance matrix in an elevated disposable VM when verification evidence is required",
+      "Replace test-signing flow with production driver signing before public distribution"
     ]
   }
 }
