@@ -1,4 +1,4 @@
-# Xdows Security Driver Packaging and Test Signing
+# Xdows Security Driver Build And Signing
 
 ## Toolchain
 
@@ -7,55 +7,48 @@
 - Target platform: `x64` by default
 - Driver package output: `D:\Code\Xdows-Security-Driver\x64\Debug\Xdows-Security-Driver`
 
-## Test Signing
+## Recommended Build
 
-Development builds use test signing only.
+For local development, build the driver directly from Visual Studio 2026:
 
-Run:
+1. Open `D:\Code\Xdows-Security-Driver\Xdows-Security-Driver.slnx`.
+2. Select `Debug|x64`.
+3. Build `Xdows-Security-Driver`.
 
-```powershell
-D:\Code\Xdows-Security-Driver\tools\Build-TestSignedDriver.ps1 -Configuration Debug -Platform x64
-```
+VS/WDK generates the package and signs both:
 
-The script:
-
-1. Reuses or creates a current-user code-signing certificate named `CN=Xdows Security Driver Test Certificate`.
-2. Builds the driver with WDK signing disabled to avoid stale WDK certificate state.
-3. Signs `Xdows-Security-Driver.sys`.
-4. Regenerates the catalog with `inf2cat`.
-5. Signs `xdows-security-driver.cat`.
-6. Exports `Xdows-Security-Driver-Test.cer` into the driver package directory.
+- `D:\Code\Xdows-Security-Driver\x64\Debug\Xdows-Security-Driver.sys`
+- `D:\Code\Xdows-Security-Driver\x64\Debug\Xdows-Security-Driver\xdows-security-driver.cat`
 
 Expected package files:
 
 - `Xdows-Security-Driver.inf`
 - `Xdows-Security-Driver.sys`
 - `xdows-security-driver.cat`
-- `Xdows-Security-Driver-Test.cer`
 
-Windows test-signing must be enabled on the test machine:
+The project sets `Inf2CatUseLocalTime=true` for all configurations so WDK `inf2cat` does not reject a freshly stamped local `DriverVer` around midnight as a future date.
+
+## Test Machine Requirements
+
+Development driver packages still require a loadable test/development signature on the target machine. If Windows refuses to load the driver, enable test-signing on the VM and reboot:
 
 ```powershell
 bcdedit /set testsigning on
+shutdown /r /t 0
 ```
 
-Restart Windows after changing test-signing. Import the exported `.cer` into the test machine certificate store before installing when Windows reports the test certificate is not trusted.
+Production driver signing, EV certificates, Microsoft attestation signing, and HLK submission are outside the current local development flow.
 
 ## App Publish Assets
 
-The WinUI app publish output includes:
+The WinUI app output includes:
 
 - `Driver\Xdows-Security-Driver.inf`
 - `Driver\Xdows-Security-Driver.sys`
 - `Driver\xdows-security-driver.cat`
-- `Driver\Xdows-Security-Driver-Test.cer`
 - `Xdows-Model-Native.dll`
 - `onnxruntime.dll`
 - `onnxruntime_providers_shared.dll`
 - `Xdows-Model.onnx`
 - `Xdows-Model-Flash.onnx`
 - `Xdows-Model-Pro.onnx`
-
-## Production Signing
-
-Production driver signing, EV certificates, Microsoft attestation signing, and HLK submission are outside the current test-signing scope. Before distributing beyond local development/test machines, replace the test-signing flow with the required Microsoft driver signing pipeline.

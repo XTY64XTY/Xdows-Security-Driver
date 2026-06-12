@@ -6,7 +6,7 @@ The driver repository owns:
 
 - `Public.h` protocol constants, IOCTLs, event structs, decision structs, state structs, shutdown token structs, and log structs.
 - Kernel event production, pending queue behavior, timeout behavior, token hashing, self-protection, injection protection, and log buffering.
-- Driver package generation and test signing.
+- Driver package generation through VS/WDK.
 
 The main app repository owns:
 
@@ -66,8 +66,7 @@ Before pushing protocol or driver behavior changes:
 
 ```powershell
 Get-Content -LiteralPath 'D:\Code\Xdows-Security-Driver\plan.json' -Raw | ConvertFrom-Json | Out-Null
-& 'D:\Code\Xdows-Security-Driver\tools\Build-TestSignedDriver.ps1' -Configuration Debug -Platform x64
-& 'D:\Code\Xdows-Security-Driver\tests\Invoke-DriverPackageSmoke.ps1' -SkipBuild
+& 'D:\Code\Xdows-Security-Driver\tests\Invoke-DriverPackageSmoke.ps1'
 & 'D:\Code\Xdows-Security\tests\Invoke-DriverBridgeProtocolSmoke.ps1'
 & 'D:\Code\Xdows-Security\tests\Invoke-PublishAssetSmoke.ps1' -SkipBuild
 & 'D:\Code\Xdows-Model\tests\Invoke-NativeConsistency.ps1' -SkipBuild

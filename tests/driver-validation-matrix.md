@@ -1,6 +1,6 @@
 # Xdows Security Driver Validation Matrix
 
-This matrix is the B17 VM and regression checklist. It assumes test signing only.
+This matrix is the B17 VM and regression checklist. It assumes a VS/WDK development-signed driver package.
 
 ## Test Environment Record
 
@@ -17,8 +17,8 @@ Before running VM tests, record:
 
 | Area | Command | Pass Criteria |
 | --- | --- | --- |
-| Driver package | `tests\Invoke-DriverPackageSmoke.ps1 -SkipBuild` | INF, SYS, CAT, CER exist; SYS and CAT have the test signer. |
-| Driver build and package | `tools\Build-TestSignedDriver.ps1 -Configuration Debug -Platform x64` | Build succeeds; catalog regenerates; test certificate is exported. |
+| Driver package | `tests\Invoke-DriverPackageSmoke.ps1` | INF, SYS, and CAT exist; SYS and CAT have a VS/WDK development signature. |
+| Driver build and package | Build `Xdows-Security-Driver` in VS2026, then run `tests\Invoke-DriverPackageSmoke.ps1` | Build succeeds; catalog regenerates; SYS and CAT are signed. |
 | Main app assets | `D:\Code\Xdows-Security\tests\Invoke-PublishAssetSmoke.ps1 -SkipBuild` | App output contains driver package, native model DLL, ORT DLLs, and ONNX files. |
 | Protocol mirror | `D:\Code\Xdows-Security\tests\Invoke-DriverBridgeProtocolSmoke.ps1` | Public.h, DriverProtocol.cs, and DriverBridgeClient IOCTL usage match. |
 | Model parity | `D:\Code\Xdows-Model\tests\Invoke-NativeConsistency.ps1 -SkipBuild` | Native and managed results match for Standard, Flash, and Pro within tolerance. |
@@ -42,7 +42,7 @@ Run only inside a disposable VM snapshot.
 
 1. Enable standard verifier rules for `Xdows-Security-Driver.sys`.
 2. Reboot the VM.
-3. Install the test-signed driver package.
+3. Install the VS/WDK development-signed driver package.
 4. Run the process, file, self-protect, injection, shutdown-token, and log-pump E2E tests.
 5. Query verifier state with `verifier /querysettings`.
 6. Disable verifier and reboot before returning the VM to normal use.

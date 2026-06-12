@@ -2,17 +2,16 @@
 
 Xdows Security 的内核驱动防护仓库。驱动负责事件采集、短时等待、决策缓存、自保护、注入相关句柄控制、关闭 token 校验和日志缓冲；模型推理、证书信任判断、用户确认 UI 和安装修复流程在用户态主程序中完成。
 
-当前发布范围是开发和测试机测试签名，不包含生产 EV、Attestation 或 HLK 签名流程。
+当前发布范围是开发和测试机签名，不包含生产 EV、Attestation 或 HLK 签名流程。
 
 ## Repository Layout
 
 - `Xdows-Security-Driver\Public.h`: 内核与主程序共享的协议版本、IOCTL、枚举和结构体。
 - `Xdows-Security-Driver\*.c`, `*.h`: KMDF 控制面、进程/文件/注入/自保护/token/log 模块。
-- `tools\Build-TestSignedDriver.ps1`: Debug/Release 驱动构建、catalog 生成和测试签名脚本。
 - `docs\driver-protection-spec.md`: 需求追踪、决策语义、失败策略和安全边界。
-- `docs\driver-packaging-signing.md`: 测试签名和发布资产说明。
+- `docs\driver-packaging-signing.md`: VS/WDK 构建、签名和发布资产说明。
 - `docs\protocol-and-maintenance.md`: 协议升级、跨仓库边界和维护规则。
-- `tests\Invoke-DriverPackageSmoke.ps1`: 驱动包与测试签名烟测。
+- `tests\Invoke-DriverPackageSmoke.ps1`: 驱动包与签名烟测。
 - `tests\driver-validation-matrix.md`: VM E2E、Driver Verifier、压力和性能验证矩阵。
 
 ## Prerequisites
@@ -22,7 +21,7 @@ Xdows Security 的内核驱动防护仓库。驱动负责事件采集、短时�
 - Windows SDK / WDK `10.0.28000.0`.
 - MSBuild at `D:\Visual-Studio\MSBuild\Current\Bin\amd64\MSBuild.exe`.
 - Administrator rights for install/start/stop/uninstall.
-- Windows test-signing mode enabled for loading the current test-signed package.
+- Windows test-signing mode enabled when the target machine does not trust the development driver signature.
 
 Enable test-signing on the VM:
 
@@ -33,25 +32,7 @@ shutdown /r /t 0
 
 ## Build
 
-Build without signing:
-
-```powershell
-& 'D:\Visual-Studio\MSBuild\Current\Bin\amd64\MSBuild.exe' `
-  'D:\Code\Xdows-Security-Driver\Xdows-Security-Driver.slnx' `
-  /p:Configuration=Debug `
-  /p:Platform=x64 `
-  /p:WindowsTargetPlatformVersion=10.0.28000.0 `
-  /p:SignMode=Off `
-  /m
-```
-
-Build and test-sign:
-
-```powershell
-& 'D:\Code\Xdows-Security-Driver\tools\Build-TestSignedDriver.ps1' `
-  -Configuration Debug `
-  -Platform x64
-```
+Open `D:\Code\Xdows-Security-Driver\Xdows-Security-Driver.slnx` in VS2026, select `Debug|x64`, and build the `Xdows-Security-Driver` project. VS/WDK generates the SYS, INF package, catalog, and signatures.
 
 Expected package directory:
 
@@ -64,7 +45,6 @@ Expected package files:
 - `Xdows-Security-Driver.inf`
 - `Xdows-Security-Driver.sys`
 - `xdows-security-driver.cat`
-- `Xdows-Security-Driver-Test.cer`
 
 ## Install And Uninstall
 
@@ -102,6 +82,8 @@ Local smoke tests:
 & 'D:\Code\Xdows-Model\tests\Invoke-NativeConsistency.ps1' -SkipBuild
 ```
 
+`Invoke-DriverPackageSmoke.ps1` validates the package already produced by VS.
+
 VM and Driver Verifier coverage is tracked in:
 
 ```text
@@ -112,10 +94,11 @@ Do not run Driver Verifier on a non-recoverable host. Use a VM snapshot.
 
 ## Troubleshooting
 
-- Driver load fails with signature errors: confirm `bcdedit /enum '{current}'` reports test-signing enabled, reboot after changing it, and import the exported `.cer` if required.
+- Driver load fails with signature errors: confirm the VS/WDK build signed SYS/CAT, then enable test-signing on the VM and reboot if this is a development build.
+- `inf2cat` reports `DriverVer set to a date in the future`: keep `Inf2CatUseLocalTime` enabled in the project and rebuild. This avoids UTC/local-time mismatches around midnight.
 - `Microsoft.Cpp.Default.props` missing: install or repair Visual Studio 2026 C++ MSBuild components and WDK integration.
 - `inf2cat` or `signtool` missing: verify the `10.0.28000.0` SDK/WDK path under `D:\Windows Kits\10\bin`.
-- Main app reports missing assets: build/sign the driver package first, build `Xdows-Model`, then rebuild `Xdows-Security`.
+- Main app reports missing assets: build the driver project in VS2026 first, build `Xdows-Model`, then rebuild `Xdows-Security`.
 - Bridge cannot connect: verify the driver service is running and `DriverProtocol.DevicePath` still matches `Public.h`.
 - Protocol mismatch: run `D:\Code\Xdows-Security\tests\Invoke-DriverBridgeProtocolSmoke.ps1`.
 

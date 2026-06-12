@@ -3,39 +3,23 @@ param(
     [string]$Configuration = "Debug",
 
     [ValidateSet("x64", "ARM64")]
-    [string]$Platform = "x64",
-
-    [switch]$SkipBuild
+    [string]$Platform = "x64"
 )
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$signScript = Join-Path $repoRoot "tools\Build-TestSignedDriver.ps1"
-
-if (!(Test-Path $signScript)) {
-    throw "Test signing script was not found: $signScript"
-}
-
-if (!$SkipBuild) {
-    & $signScript -Configuration $Configuration -Platform $Platform
-    if ($LASTEXITCODE -ne 0) {
-        throw "Driver test signing script failed with exit code $LASTEXITCODE"
-    }
-}
-
 $packageDir = Join-Path $repoRoot (Join-Path $Platform (Join-Path $Configuration "Xdows-Security-Driver"))
 $requiredFiles = @(
     "Xdows-Security-Driver.inf",
     "Xdows-Security-Driver.sys",
-    "xdows-security-driver.cat",
-    "Xdows-Security-Driver-Test.cer"
+    "xdows-security-driver.cat"
 )
 
 foreach ($relative in $requiredFiles) {
     $path = Join-Path $packageDir $relative
     if (!(Test-Path $path)) {
-        throw "Required driver package file was not found: $path"
+        throw "Required driver package file was not found: $path. Build Xdows-Security-Driver in VS2026 first, then rerun this smoke test."
     }
 
     if ((Get-Item -LiteralPath $path).Length -le 0) {
@@ -63,7 +47,7 @@ $signedFiles = @(
 $signatureResults = foreach ($path in $signedFiles) {
     $signature = Get-AuthenticodeSignature -LiteralPath $path
     if ($signature.Status -eq "NotSigned" -or $null -eq $signature.SignerCertificate) {
-        throw "Expected a test signature on $path, but signature status was $($signature.Status)."
+        throw "Expected a VS/WDK build signature on $path, but signature status was $($signature.Status)."
     }
 
     [pscustomobject]@{

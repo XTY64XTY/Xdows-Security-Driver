@@ -59,7 +59,7 @@
     "implementedBlockCount": 19,
     "verifiedBlockCount": 2,
     "totalBlockCount": 19,
-    "notes": "B01 verified；B02-B18 implemented；B04 native C++ ONNX Runtime inference builds and smoke-tests with Standard/Flash/Pro modes. B16 uses test signing only. B17 adds local smoke tests and VM/Driver Verifier validation matrix; VM/admin tests are documented but not marked verified in this non-admin session. B18 documents build, install, protocol, assets, troubleshooting, and maintenance flow across all three repositories."
+    "notes": "B01 verified；B02-B18 implemented；B04 native C++ ONNX Runtime inference builds and smoke-tests with Standard/Flash/Pro modes. B16 uses VS2026/WDK direct driver build/sign output; the standalone test-signing script was removed to simplify the build path. B17 adds local smoke tests and VM/Driver Verifier validation matrix; VM/admin tests are documented but not marked verified in this non-admin session. B18 documents build, install, protocol, assets, troubleshooting, and maintenance flow across all three repositories."
   },
   "globalCommands": [
     {
@@ -1997,15 +1997,14 @@
       "subtasks": [
         {
           "id": "B16.1",
-          "title": "完成开发测试签名和 catalog 生成流程",
+          "title": "完成 VS/WDK 开发签名和 catalog 生成流程",
           "status": "implemented",
           "implemented": true,
           "evidence": [
-            "D:\\Code\\Xdows-Security-Driver\\tools\\Build-TestSignedDriver.ps1",
             "D:\\Code\\Xdows-Security-Driver\\x64\\Debug\\Xdows-Security-Driver\\Xdows-Security-Driver.sys",
             "D:\\Code\\Xdows-Security-Driver\\x64\\Debug\\Xdows-Security-Driver\\xdows-security-driver.cat",
-            "D:\\Code\\Xdows-Security-Driver\\x64\\Debug\\Xdows-Security-Driver\\Xdows-Security-Driver-Test.cer",
-            "Build-TestSignedDriver.ps1 -Configuration Debug -Platform x64 passed; sys and cat signed with CN=Xdows Security Driver Test Certificate"
+            "VS2026 Debug x64 build generated SYS/INF/CAT and signed SYS/CAT through the WDK build pipeline",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Xdows-Security-Driver.vcxproj sets Inf2CatUseLocalTime=true to avoid UTC/local DriverVer drift"
           ],
           "lastUpdatedAt": "2026-06-11",
           "lastUpdatedBy": "Codex"
@@ -2018,7 +2017,7 @@
           "evidence": [
             "D:\\Code\\Xdows-Security\\Protection\\Protection.csproj",
             "D:\\Code\\Xdows-Security\\Xdows-Security\\Xdows-Security.csproj",
-            "App output contains Driver\\Xdows-Security-Driver.inf/sys/cat/cer, Xdows-Model-Native.dll, onnxruntime.dll, onnxruntime_providers_shared.dll, and all three ONNX model files"
+            "App output contains Driver\\Xdows-Security-Driver.inf/sys/cat, Xdows-Model-Native.dll, onnxruntime.dll, onnxruntime_providers_shared.dll, and all three ONNX model files"
           ],
           "lastUpdatedAt": "2026-06-11",
           "lastUpdatedBy": "Codex"
@@ -2046,23 +2045,22 @@
           ],
           "lastUpdatedAt": "2026-06-11",
           "lastUpdatedBy": "Codex",
-          "notes": "Current scope is test signing only; production EV/attestation/HLK signing remains explicitly documented as out of scope."
+          "notes": "Current scope is VS/WDK development signing only; production EV/attestation/HLK signing remains explicitly documented as out of scope."
         }
       ],
       "evidence": [
-        "D:\\Code\\Xdows-Security-Driver\\tools\\Build-TestSignedDriver.ps1",
         "D:\\Code\\Xdows-Security-Driver\\docs\\driver-packaging-signing.md",
         "D:\\Code\\Xdows-Security\\Protection\\Protection.csproj",
         "D:\\Code\\Xdows-Security\\Xdows-Security\\Xdows-Security.csproj",
         "D:\\Code\\Xdows-Security\\Protection\\DriverEnvironmentChecker.cs",
         "D:\\Code\\Xdows-Security\\Protection\\DriverInstaller.cs",
-        "Build-TestSignedDriver.ps1 -Configuration Debug -Platform x64 passed with signed sys and cat",
+        "VS2026/WDK Debug x64 driver build passed with signed sys and cat",
         "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 0 warnings/0 errors",
         "App output asset check passed for Driver package, native model DLL, ORT DLLs, and ONNX model files"
       ],
       "lastUpdatedAt": "2026-06-11",
       "lastUpdatedBy": "Codex",
-      "notes": "B16 uses test signing only. Driver package generation and test signing are scripted; WinUI output includes driver and model runtime assets; installer helpers cover install/upgrade, service restart, uninstall, and likely reboot messaging."
+      "notes": "B16 uses VS2026/WDK development signing only. Driver package generation and signing are produced by the normal VS build; the standalone test-signing script has been removed. WinUI output includes driver and model runtime assets; installer helpers cover install/upgrade, service restart, uninstall, and likely reboot messaging."
     },
     {
       "id": "B17",
@@ -2160,7 +2158,7 @@
           "evidence": [
             "D:\\Code\\Xdows-Security-Driver\\tests\\driver-validation-matrix.md",
             "D:\\Code\\Xdows-Security-Driver\\tests\\Invoke-DriverPackageSmoke.ps1",
-            "Invoke-DriverPackageSmoke.ps1 passed after running tools\\Build-TestSignedDriver.ps1 for Debug x64; SYS and CAT have test signatures"
+            "Invoke-DriverPackageSmoke.ps1 validates the package produced by VS2026; SYS and CAT have development signatures"
           ],
           "lastUpdatedAt": "2026-06-12",
           "lastUpdatedBy": "Codex",
@@ -2178,7 +2176,7 @@
         "Invoke-NativeConsistency.ps1 -SkipBuild passed for Standard/Flash/Pro with delta 0.00",
         "Invoke-DriverBridgeProtocolSmoke.ps1 passed with 95 checks",
         "Invoke-PublishAssetSmoke.ps1 -SkipBuild passed for driver, native model, ORT, and ONNX app output assets",
-        "Invoke-DriverPackageSmoke.ps1 passed after running Build-TestSignedDriver.ps1; Debug x64 package contains test-signed SYS/CAT and exported CER"
+        "Invoke-DriverPackageSmoke.ps1 passed against the VS2026-generated Debug x64 package; package contains signed SYS/CAT"
       ],
       "lastUpdatedAt": "2026-06-12",
       "lastUpdatedBy": "Codex",
@@ -2273,6 +2271,7 @@
       "evidence": [
         "D:\\Code\\Xdows-Security-Driver\\README.md",
         "D:\\Code\\Xdows-Security-Driver\\docs\\protocol-and-maintenance.md",
+        "D:\\Code\\Xdows-Security-Driver\\docs\\driver-packaging-signing.md",
         "D:\\Code\\Xdows-Security\\README.md",
         "D:\\Code\\Xdows-Model\\README.md",
         "D:\\Code\\Xdows-Security-Driver\\plan.json",
@@ -2285,7 +2284,7 @@
       ],
       "lastUpdatedAt": "2026-06-12",
       "lastUpdatedBy": "Codex",
-      "notes": "B18 documents development prerequisites, test signing, app publish assets, protocol version rules, module boundaries, validation commands, troubleshooting, and safety boundaries across the driver, app, and model repos."
+      "notes": "B18 documents development prerequisites, VS2026/WDK driver signing, app publish assets, protocol version rules, module boundaries, validation commands, troubleshooting, and safety boundaries across the driver, app, and model repos. The simplified flow is: build driver in VS, build model, build main app."
     }
   ],
   "lastCheckpoint": {
@@ -2295,6 +2294,7 @@
     "evidence": [
       "D:\\Code\\Xdows-Security-Driver\\README.md",
       "D:\\Code\\Xdows-Security-Driver\\docs\\protocol-and-maintenance.md",
+      "D:\\Code\\Xdows-Security-Driver\\docs\\driver-packaging-signing.md",
       "D:\\Code\\Xdows-Security\\README.md",
       "D:\\Code\\Xdows-Model\\README.md",
       "D:\\Code\\Xdows-Model\\tests\\Invoke-NativeConsistency.ps1",
@@ -2305,11 +2305,11 @@
       "Invoke-NativeConsistency.ps1 -SkipBuild passed for Standard/Flash/Pro with delta 0.00",
       "Invoke-DriverBridgeProtocolSmoke.ps1 passed with 95 checks",
       "Invoke-PublishAssetSmoke.ps1 -SkipBuild passed for driver/model assets",
-      "Invoke-DriverPackageSmoke.ps1 passed after test-signing Debug x64 package"
+      "Invoke-DriverPackageSmoke.ps1 passed against VS2026-generated Debug x64 package"
     ],
     "next": [
       "Run VM Driver Verifier, E2E, stress, and performance matrix in an elevated disposable VM when verification evidence is required",
-      "Replace test-signing flow with production driver signing before public distribution"
+      "Replace VS/WDK development signing with production driver signing before public distribution"
     ]
   }
 }
