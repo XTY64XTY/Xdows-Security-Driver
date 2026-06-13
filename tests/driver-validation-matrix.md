@@ -19,7 +19,8 @@ Before running VM tests, record:
 | --- | --- | --- |
 | Driver package | `tests\Invoke-DriverPackageSmoke.ps1` | INF, SYS, and CAT exist; SYS and CAT have a VS/WDK development signature. |
 | Driver build and package | Build `Xdows-Security-Driver` in VS2026, then run `tests\Invoke-DriverPackageSmoke.ps1` | Build succeeds; catalog regenerates; SYS and CAT are signed. |
-| Main app assets | `D:\Code\Xdows-Security\tests\Invoke-PublishAssetSmoke.ps1 -SkipBuild` | App output contains driver package, native model DLL, ORT DLLs, and ONNX files. |
+| Main solution build and app assets | `D:\Code\Xdows-Security\tests\Invoke-PublishAssetSmoke.ps1` | Main solution builds the driver/native projects; app output contains driver package, native model DLL, ORT DLLs, and ONNX files. |
+| First-time app install/start path | Enable Driver Protection from elevated Xdows Security on a disposable VM with no existing `Root\XdowsSecurityDriver` device | App creates the root device, installs the copied driver package, starts `Xdows-Security-Driver`, and connects the bridge. |
 | Protocol mirror | `D:\Code\Xdows-Security\tests\Invoke-DriverBridgeProtocolSmoke.ps1` | Public.h, DriverProtocol.cs, and DriverBridgeClient IOCTL usage match. |
 | Model parity | `D:\Code\Xdows-Model\tests\Invoke-NativeConsistency.ps1 -SkipBuild` | Native and managed results match for Standard, Flash, and Pro within tolerance. |
 
@@ -34,7 +35,7 @@ Before running VM tests, record:
 | Thread handle protection | From an unsigned helper, try to open the main UI thread with suspend rights. Confirm prompt. | Select Block. Confirm handle is denied. | Exit app voluntarily and confirm voluntary-exit token path avoids false block. | Helper output, driver log. |
 | Image load / injection | Attempt benign DLL load into a test process from a trusted signer. Confirm allow. | Attempt DLL load from unsigned helper and select Block. Confirm load is denied or process is stopped. | Bridge unavailable during image-load event. Confirm timeout behavior and no bugcheck. | Loader output, driver log. |
 | Shutdown token | Stop protection from the app. Confirm authorized shutdown succeeds. | Replay or forge a shutdown IOCTL without token. Confirm denied. | Submit stale token after successful stop. Confirm denied and no plaintext token in logs. | Service state, driver log. |
-| Environment repair | Start app with driver missing. Confirm environment dialog identifies missing driver. | Install with untrusted/unsigned package while test signing disabled. Confirm diagnostic is explicit. | Remove model/native assets. Confirm repair guidance reports missing files. | Dialog screenshot, app log. |
+| Environment repair | Start app with driver missing. Confirm environment dialog identifies missing driver and repair creates `Root\XdowsSecurityDriver` before installation. | Install with untrusted/unsigned package while test signing disabled. Confirm diagnostic is explicit. | Remove model/native assets. Confirm repair guidance reports missing files. | Dialog screenshot, app log. |
 
 ## Driver Verifier
 

@@ -32,7 +32,9 @@ shutdown /r /t 0
 
 ## Build
 
-Open `D:\Code\Xdows-Security-Driver\Xdows-Security-Driver.slnx` in VS2026, select `Debug|x64`, and build the `Xdows-Security-Driver` project. VS/WDK generates the SYS, INF package, catalog, and signatures.
+For the app-integrated flow, build `D:\Code\Xdows-Security\Xdows-Security.slnx` with VS2026/MSBuild as `Debug|x64`. That solution references this driver project and copies the generated package into the Xdows Security app output.
+
+You can still build the driver directly by opening `D:\Code\Xdows-Security-Driver\Xdows-Security-Driver.slnx`, selecting `Debug|x64`, and building `Xdows-Security-Driver`.
 
 Expected package directory:
 
@@ -48,12 +50,16 @@ Expected package files:
 
 ## Install And Uninstall
 
-Install in an elevated PowerShell session on a test machine:
+The Xdows Security app creates the `Root\XdowsSecurityDriver` root device when needed, installs the package from its `Driver` output folder, and starts the driver automatically when Driver Protection is enabled.
+
+Manual install in an elevated PowerShell session on a test machine is mainly for upgrade or diagnosis after the root device exists:
 
 ```powershell
 pnputil /add-driver 'D:\Code\Xdows-Security-Driver\x64\Debug\Xdows-Security-Driver\Xdows-Security-Driver.inf' /install
 sc start Xdows-Security-Driver
 ```
+
+For first-time installs, prefer the Xdows Security app flow so the root device is created before `pnputil /install` binds the driver package.
 
 Query state:
 
@@ -78,7 +84,7 @@ Local smoke tests:
 ```powershell
 & 'D:\Code\Xdows-Security-Driver\tests\Invoke-DriverPackageSmoke.ps1'
 & 'D:\Code\Xdows-Security\tests\Invoke-DriverBridgeProtocolSmoke.ps1'
-& 'D:\Code\Xdows-Security\tests\Invoke-PublishAssetSmoke.ps1' -SkipBuild
+& 'D:\Code\Xdows-Security\tests\Invoke-PublishAssetSmoke.ps1'
 & 'D:\Code\Xdows-Model\tests\Invoke-NativeConsistency.ps1' -SkipBuild
 ```
 
@@ -98,7 +104,7 @@ Do not run Driver Verifier on a non-recoverable host. Use a VM snapshot.
 - `inf2cat` reports `DriverVer set to a date in the future`: keep `Inf2CatUseLocalTime` enabled in the project and rebuild. This avoids UTC/local-time mismatches around midnight.
 - `Microsoft.Cpp.Default.props` missing: install or repair Visual Studio 2026 C++ MSBuild components and WDK integration.
 - `inf2cat` or `signtool` missing: verify the `10.0.28000.0` SDK/WDK path under `D:\Windows Kits\10\bin`.
-- Main app reports missing assets: build the driver project in VS2026 first, build `Xdows-Model`, then rebuild `Xdows-Security`.
+- Main app reports missing assets: build `D:\Code\Xdows-Security\Xdows-Security.slnx` with VS2026/MSBuild as `Debug|x64` so the driver and native model projects are generated before app asset collection.
 - Bridge cannot connect: verify the driver service is running and `DriverProtocol.DevicePath` still matches `Public.h`.
 - Protocol mismatch: run `D:\Code\Xdows-Security\tests\Invoke-DriverBridgeProtocolSmoke.ps1`.
 

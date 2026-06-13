@@ -9,7 +9,21 @@
 
 ## Recommended Build
 
-For local development, build the driver directly from Visual Studio 2026:
+For app-integrated local development, build the main Xdows Security solution:
+
+```powershell
+& 'D:\Visual-Studio\MSBuild\Current\Bin\amd64\MSBuild.exe' `
+  'D:\Code\Xdows-Security\Xdows-Security.slnx' `
+  /p:Configuration=Debug `
+  /p:Platform=x64 `
+  /p:WindowsTargetPlatformVersion=10.0.28000.0 `
+  /p:SignMode=Off `
+  /m
+```
+
+The main solution references `Xdows-Security-Driver.vcxproj`, then copies the generated driver package into the Xdows Security app output.
+
+For driver-only validation, build the driver directly from Visual Studio 2026:
 
 1. Open `D:\Code\Xdows-Security-Driver\Xdows-Security-Driver.slnx`.
 2. Select `Debug|x64`.
@@ -41,7 +55,7 @@ Production driver signing, EV certificates, Microsoft attestation signing, and H
 
 ## App Publish Assets
 
-The WinUI app output includes:
+After building `Xdows-Security.slnx`, the WinUI app output includes:
 
 - `Driver\Xdows-Security-Driver.inf`
 - `Driver\Xdows-Security-Driver.sys`

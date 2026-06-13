@@ -13,7 +13,8 @@ The main app repository owns:
 - `Protection\DriverProtocol.cs`, which must mirror `Public.h`.
 - `Protection\DriverBridgeClient.cs`, which opens `\\.\XdowsSecurityDriver`, registers the client, sends heartbeats, pulls events/logs, submits decisions, and submits authorized shutdown.
 - `Protection\DriverProtection.cs`, which scans, checks trust, asks the user, caches decisions, writes logs, and handles failure policy.
-- App publish output that includes the driver package and native model assets.
+- `Protection\DriverInstaller.cs`, `Protection\DriverPackageLocator.cs`, and `Protection\DriverRootDeviceInstaller.cs`, which create the root device, install the generated driver package, and start it automatically before the bridge connects.
+- App build/publish output that includes the driver package and native model assets from projects referenced by `Xdows-Security.slnx`.
 
 The model repository owns:
 
@@ -68,7 +69,7 @@ Before pushing protocol or driver behavior changes:
 Get-Content -LiteralPath 'D:\Code\Xdows-Security-Driver\plan.json' -Raw | ConvertFrom-Json | Out-Null
 & 'D:\Code\Xdows-Security-Driver\tests\Invoke-DriverPackageSmoke.ps1'
 & 'D:\Code\Xdows-Security\tests\Invoke-DriverBridgeProtocolSmoke.ps1'
-& 'D:\Code\Xdows-Security\tests\Invoke-PublishAssetSmoke.ps1' -SkipBuild
+& 'D:\Code\Xdows-Security\tests\Invoke-PublishAssetSmoke.ps1'
 & 'D:\Code\Xdows-Model\tests\Invoke-NativeConsistency.ps1' -SkipBuild
 ```
 
