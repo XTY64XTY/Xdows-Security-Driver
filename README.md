@@ -50,7 +50,7 @@ Expected package files:
 
 ## Install And Uninstall
 
-The Xdows Security app creates or reuses the `Root\XdowsSecurityDriver` root device when needed, stages the package from its `Driver` output folder with `pnputil`, binds the INF to that root device, starts `Xdows-Security-Driver`, and then checks that the bridge can connect when Driver Protection is enabled.
+The Xdows Security app creates the `Root\XdowsSecurityDriver` root device when needed, installs the package from its `Driver` output folder, and starts the driver automatically when Driver Protection is enabled.
 
 Manual install in an elevated PowerShell session on a test machine is mainly for upgrade or diagnosis after the root device exists:
 
