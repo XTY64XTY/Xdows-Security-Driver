@@ -21,7 +21,7 @@ For app-integrated local development, build the main Xdows Security solution:
   /m
 ```
 
-The main solution references `Xdows-Security-Driver.vcxproj`, then copies the generated driver package into the Xdows Security app output.
+The main solution references `Xdows-Security-Driver.vcxproj`, then copies the generated driver package into the Xdows Security app output. At runtime the app owns installation repair: it creates or reuses the `Root\XdowsSecurityDriver` root device, stages the copied INF with `pnputil`, binds that INF to the root device, starts the service, and validates bridge connectivity.
 
 For driver-only validation, build the driver directly from Visual Studio 2026:
 
