@@ -12,7 +12,7 @@ DriverVer   = 06/09/2026,1.0.0.0
 PnpLockdown = 1
 
 [DestinationDirs]
-DefaultDestDir = 13
+Xdows-Security-Driver.DriverFiles = 13
 
 [SourceDisksNames]
 1 = %DiskName%,,,""
@@ -24,49 +24,44 @@ Xdows-Security-Driver.sys  = 1,,
 ; Install Section
 ;*****************************************
 
-[Manufacturer]
-%ManufacturerName% = Standard,NT$ARCH$.10.0...16299 ; %13% support introduced in build 16299
+[DefaultInstall.NT$ARCH$]
+OptionDesc = %Xdows-Security-Driver.SVCDESC%
+CopyFiles  = Xdows-Security-Driver.DriverFiles
 
-[Standard.NT$ARCH$.10.0...16299]
-%Xdows-Security-Driver.DeviceDesc% = Xdows-Security-Driver_Device, Root\XdowsSecurityDriver
-
-[Xdows-Security-Driver_Device.NT]
-CopyFiles = File_Copy
-AddReg = Xdows-Security-Driver.AddRegistry
-
-[File_Copy]
+[Xdows-Security-Driver.DriverFiles]
 Xdows-Security-Driver.sys
 
 ;-------------- Service installation
-[Xdows-Security-Driver_Device.NT.Services]
-AddService = Xdows-Security-Driver,%SPSVCINST_ASSOCSERVICE%, Xdows-Security-Driver_Service_Inst
+[DefaultInstall.NT$ARCH$.Services]
+AddService = Xdows-Security-Driver,, Xdows-Security-Driver_Service_Inst
 
 ; -------------- Xdows-Security-Driver driver install sections
 [Xdows-Security-Driver_Service_Inst]
 DisplayName    = %Xdows-Security-Driver.SVCDESC%
+Description    = %Xdows-Security-Driver.SVCDESC%
 ServiceType    = 2               ; SERVICE_FILE_SYSTEM_DRIVER
 StartType      = 3               ; SERVICE_DEMAND_START
 ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
 ServiceBinary  = %13%\Xdows-Security-Driver.sys
 LoadOrderGroup = "FSFilter Activity Monitor"
 Dependencies   = FltMgr
+AddReg         = Xdows-Security-Driver.AddRegistry
 
 [Xdows-Security-Driver.AddRegistry]
+HKR,,"SupportedFeatures",0x00010001,0x3
 HKR,"Instances","DefaultInstance",0x00000000,%DefaultInstance%
 HKR,"Instances\%DefaultInstance%","Altitude",0x00000000,%Altitude%
 HKR,"Instances\%DefaultInstance%","Flags",0x00010001,0
 
-[Xdows-Security-Driver_Device.NT.Wdf]
+[DefaultInstall.NT$ARCH$.Wdf]
 KmdfService = Xdows-Security-Driver, Xdows-Security-Driver_wdfsect
 
 [Xdows-Security-Driver_wdfsect]
 KmdfLibraryVersion = $KMDFVERSION$
 
 [Strings]
-SPSVCINST_ASSOCSERVICE = 0x00000002
-ManufacturerName = "Xigua Studio"
+ManufacturerName = "Xdows Software"
 DiskName = "Xdows-Security-Driver Installation Disk"
-Xdows-Security-Driver.DeviceDesc = "Xdows Security Protection Driver"
 Xdows-Security-Driver.SVCDESC = "Xdows Security Protection Driver"
 DefaultInstance = "Xdows Security Protection Instance"
 Altitude = "370030"
