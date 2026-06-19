@@ -64,6 +64,7 @@ Return Value:
         WdfIoQueueDispatchParallel
         );
 
+    queueConfig.PowerManaged = WdfFalse;
     queueConfig.EvtIoDeviceControl = XdowsSecurityDriverEvtIoDeviceControl;
     queueConfig.EvtIoStop = XdowsSecurityDriverEvtIoStop;
 

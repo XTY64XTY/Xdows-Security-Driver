@@ -35,6 +35,8 @@ XdowsSecurityDriverInitializeDevice(
     PAGED_CODE();
 
     RtlInitUnicodeString(&symbolicName, XDOWS_SECURITY_SYMBOLIC_NAME);
+    (VOID)IoDeleteSymbolicLink(&symbolicName);
+
     status = WdfDeviceCreateSymbolicLink(Device, &symbolicName);
     if (!NT_SUCCESS(status)) {
         return status;
