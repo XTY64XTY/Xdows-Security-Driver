@@ -60,6 +60,10 @@ XdowsShutdownGlobalContext(
     KIRQL oldIrql;
     LIST_ENTRY localList;
 
+    if (!g_XdowsDriverContext.Initialized) {
+        return;
+    }
+
     InitializeListHead(&localList);
 
     KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);

@@ -19,7 +19,7 @@ Environment:
 
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text (INIT, DriverEntry)
-#pragma alloc_text (PAGE, XdowsSecurityDriverEvtDeviceAdd)
+#pragma alloc_text (PAGE, XdowsSecurityDriverEvtDriverUnload)
 #pragma alloc_text (PAGE, XdowsSecurityDriverEvtDriverContextCleanup)
 #endif
 
@@ -57,6 +57,7 @@ Return Value:
     WDF_DRIVER_CONFIG config;
     NTSTATUS status;
     WDF_OBJECT_ATTRIBUTES attributes;
+    WDFDRIVER driver;
 
     //
     // Initialize WPP Tracing
@@ -72,15 +73,15 @@ Return Value:
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
     attributes.EvtCleanupCallback = XdowsSecurityDriverEvtDriverContextCleanup;
 
-    WDF_DRIVER_CONFIG_INIT(&config,
-                           XdowsSecurityDriverEvtDeviceAdd
-                           );
+    WDF_DRIVER_CONFIG_INIT(&config, WDF_NO_EVENT_CALLBACK);
+    config.DriverInitFlags |= WdfDriverInitNonPnpDriver;
+    config.EvtDriverUnload = XdowsSecurityDriverEvtDriverUnload;
 
     status = WdfDriverCreate(DriverObject,
                              RegistryPath,
                              &attributes,
                              &config,
-                             WDF_NO_HANDLE
+                             &driver
                              );
 
     if (!NT_SUCCESS(status)) {
@@ -89,48 +90,28 @@ Return Value:
         return status;
     }
 
+    status = XdowsSecurityDriverCreateControlDevice(driver);
+    if (!NT_SUCCESS(status)) {
+        TraceEvents(TRACE_LEVEL_ERROR, TRACE_DRIVER, "Create control device failed %!STATUS!", status);
+        WdfObjectDelete(driver);
+        return status;
+    }
+
     TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Exit");
 
     return status;
 }
 
-NTSTATUS
-XdowsSecurityDriverEvtDeviceAdd(
-    _In_    WDFDRIVER       Driver,
-    _Inout_ PWDFDEVICE_INIT DeviceInit
+VOID
+XdowsSecurityDriverEvtDriverUnload(
+    _In_ WDFDRIVER Driver
     )
-/*++
-Routine Description:
-
-    EvtDeviceAdd is called by the framework in response to AddDevice
-    call from the PnP manager. We create and initialize a device object to
-    represent a new instance of the device.
-
-Arguments:
-
-    Driver - Handle to a framework driver object created in DriverEntry
-
-    DeviceInit - Pointer to a framework-allocated WDFDEVICE_INIT structure.
-
-Return Value:
-
-    NTSTATUS
-
---*/
 {
-    NTSTATUS status;
-
     UNREFERENCED_PARAMETER(Driver);
 
     PAGED_CODE();
 
     TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Entry");
-
-    status = XdowsSecurityDriverCreateDevice(DeviceInit);
-
-    TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Exit");
-
-    return status;
 }
 
 VOID

@@ -18,6 +18,7 @@ Environment:
 
 #include <ntddk.h>
 #include <wdf.h>
+#include <wdmsec.h>
 #include <initguid.h>
 
 #include "device.h"
@@ -35,7 +36,7 @@ EXTERN_C_START
 //
 
 DRIVER_INITIALIZE DriverEntry;
-EVT_WDF_DRIVER_DEVICE_ADD XdowsSecurityDriverEvtDeviceAdd;
+EVT_WDF_DRIVER_UNLOAD XdowsSecurityDriverEvtDriverUnload;
 EVT_WDF_OBJECT_CONTEXT_CLEANUP XdowsSecurityDriverEvtDriverContextCleanup;
 
 EXTERN_C_END
