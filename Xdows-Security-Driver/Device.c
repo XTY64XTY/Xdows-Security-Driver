@@ -31,15 +31,23 @@ XdowsSecurityDriverInitializeDevice(
 {
     NTSTATUS status;
     UNICODE_STRING symbolicName;
+    UNICODE_STRING legacySymbolicName;
 
     PAGED_CODE();
+
+    RtlInitUnicodeString(&legacySymbolicName, XDOWS_SECURITY_LEGACY_SYMBOLIC_NAME);
+    (VOID)IoDeleteSymbolicLink(&legacySymbolicName);
 
     RtlInitUnicodeString(&symbolicName, XDOWS_SECURITY_SYMBOLIC_NAME);
     (VOID)IoDeleteSymbolicLink(&symbolicName);
 
     status = WdfDeviceCreateSymbolicLink(Device, &symbolicName);
     if (!NT_SUCCESS(status)) {
-        return status;
+        RtlInitUnicodeString(&symbolicName, XDOWS_SECURITY_LEGACY_SYMBOLIC_NAME);
+        status = WdfDeviceCreateSymbolicLink(Device, &symbolicName);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
     }
 
     if (CreateDeviceInterface) {

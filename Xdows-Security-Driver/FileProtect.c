@@ -8,6 +8,20 @@ static PFLT_FILTER g_XdowsFilter;
 
 static
 VOID
+XdowsFileProtectUnregisterFilter(
+    VOID
+    )
+{
+    PFLT_FILTER filter = g_XdowsFilter;
+    g_XdowsFilter = NULL;
+
+    if (filter != NULL) {
+        FltUnregisterFilter(filter);
+    }
+}
+
+static
+VOID
 XdowsCopyUnicodeToFixedBuffer(
     _Out_writes_(DestinationChars) PWCHAR Destination,
     _In_ size_t DestinationChars,
@@ -329,7 +343,8 @@ XdowsFileProtectUnload(
     )
 {
     UNREFERENCED_PARAMETER(Flags);
-    g_XdowsFilter = NULL;
+
+    XdowsFileProtectUnregisterFilter();
     return STATUS_SUCCESS;
 }
 
@@ -423,11 +438,8 @@ XdowsFileProtectShutdown(
     VOID
     )
 {
-    PFLT_FILTER filter = g_XdowsFilter;
-    g_XdowsFilter = NULL;
-
-    if (filter != NULL) {
-        FltUnregisterFilter(filter);
+    if (g_XdowsFilter != NULL) {
+        XdowsFileProtectUnregisterFilter();
         XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"File", L"File minifilter stopped.");
     }
 }

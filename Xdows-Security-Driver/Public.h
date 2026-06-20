@@ -25,7 +25,8 @@ Environment:
 #define XDOWS_SECURITY_MAX_LOG_MESSAGE_CHARS 256u
 
 #define XDOWS_SECURITY_DEVICE_NAME L"\\Device\\XdowsSecurityDriver"
-#define XDOWS_SECURITY_SYMBOLIC_NAME L"\\DosDevices\\XdowsSecurityDriver"
+#define XDOWS_SECURITY_SYMBOLIC_NAME L"\\DosDevices\\Global\\XdowsSecurityDriver"
+#define XDOWS_SECURITY_LEGACY_SYMBOLIC_NAME L"\\DosDevices\\XdowsSecurityDriver"
 #define XDOWS_SECURITY_USER_DEVICE_PATH L"\\\\.\\XdowsSecurityDriver"
 
 #define FILE_DEVICE_XDOWS_SECURITY 0x8000u

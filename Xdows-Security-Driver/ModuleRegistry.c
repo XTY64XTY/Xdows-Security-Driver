@@ -29,6 +29,8 @@ typedef enum _XDOWS_MODULE_INDEX {
 
 static BOOLEAN g_ModuleStarted[XdowsModuleCount];
 
+typedef NTSTATUS (*XDOWS_MODULE_INITIALIZER)(VOID);
+
 static
 VOID
 XdowsMarkStarted(
@@ -36,6 +38,31 @@ XdowsMarkStarted(
     )
 {
     g_ModuleStarted[Index] = TRUE;
+}
+
+static
+VOID
+XdowsTryStartModule(
+    _In_ XDOWS_MODULE_INDEX Index,
+    _In_z_ PCWSTR Name,
+    _In_ XDOWS_MODULE_INITIALIZER Initializer
+    )
+{
+    NTSTATUS status;
+
+    status = Initializer();
+    if (NT_SUCCESS(status)) {
+        XdowsMarkStarted(Index);
+        return;
+    }
+
+    XdowsLogWriteStatus(
+        XdowsSecurityLogWarning,
+        0,
+        0,
+        Name,
+        L"Protection module startup skipped",
+        status);
 }
 
 NTSTATUS
@@ -53,35 +80,11 @@ XdowsModulesInitialize(
     }
     XdowsMarkStarted(XdowsModuleLog);
 
-    status = XdowsTokenAuthInitialize();
-    if (!NT_SUCCESS(status)) {
-        goto Fail;
-    }
-    XdowsMarkStarted(XdowsModuleTokenAuth);
-
-    status = XdowsProcessProtectInitialize();
-    if (!NT_SUCCESS(status)) {
-        goto Fail;
-    }
-    XdowsMarkStarted(XdowsModuleProcess);
-
-    status = XdowsFileProtectInitialize();
-    if (!NT_SUCCESS(status)) {
-        goto Fail;
-    }
-    XdowsMarkStarted(XdowsModuleFile);
-
-    status = XdowsInjectionProtectInitialize();
-    if (!NT_SUCCESS(status)) {
-        goto Fail;
-    }
-    XdowsMarkStarted(XdowsModuleInjection);
-
-    status = XdowsSelfProtectInitialize();
-    if (!NT_SUCCESS(status)) {
-        goto Fail;
-    }
-    XdowsMarkStarted(XdowsModuleSelf);
+    XdowsTryStartModule(XdowsModuleTokenAuth, L"TokenAuth", XdowsTokenAuthInitialize);
+    XdowsTryStartModule(XdowsModuleProcess, L"Process", XdowsProcessProtectInitialize);
+    XdowsTryStartModule(XdowsModuleFile, L"File", XdowsFileProtectInitialize);
+    XdowsTryStartModule(XdowsModuleInjection, L"Injection", XdowsInjectionProtectInitialize);
+    XdowsTryStartModule(XdowsModuleSelf, L"SelfProtect", XdowsSelfProtectInitialize);
 
     return STATUS_SUCCESS;
 

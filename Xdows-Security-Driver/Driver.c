@@ -112,6 +112,8 @@ XdowsSecurityDriverEvtDriverUnload(
     PAGED_CODE();
 
     TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Entry");
+    XdowsModulesShutdown();
+    XdowsShutdownGlobalContext();
 }
 
 VOID

@@ -9,7 +9,12 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$packageDir = Join-Path $repoRoot (Join-Path $Platform (Join-Path $Configuration "Xdows-Security-Driver"))
+$projectPackageDir = Join-Path $repoRoot (Join-Path "Xdows-Security-Driver" (Join-Path $Platform (Join-Path $Configuration "Xdows-Security-Driver")))
+$solutionPackageDir = Join-Path $repoRoot (Join-Path $Platform (Join-Path $Configuration "Xdows-Security-Driver"))
+$packageDir = @($projectPackageDir, $solutionPackageDir) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($packageDir)) {
+    $packageDir = $projectPackageDir
+}
 $requiredFiles = @(
     "Xdows-Security-Driver.inf",
     "Xdows-Security-Driver.sys",
