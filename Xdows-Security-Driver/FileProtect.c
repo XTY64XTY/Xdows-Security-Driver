@@ -2,6 +2,13 @@
 #include "driver.h"
 #include <ntstrsafe.h>
 
+// STATUS_VIRUS_INFECTED maps to the Windows shell message
+// "Operation did not complete successfully because the file contains a virus
+// or potentially unwanted software." Some older WDK headers may not define it.
+#ifndef STATUS_VIRUS_INFECTED
+#define STATUS_VIRUS_INFECTED ((NTSTATUS)0xC0000222L)
+#endif
+
 #define XDOWS_FILEPROTECT_MAX_FILE_BYTES (512ULL * 1024ULL * 1024ULL)
 
 static PFLT_FILTER g_XdowsFilter;
@@ -199,7 +206,7 @@ XdowsFileProtectPreCreate(
             decision.Decision == XdowsSecurityDecisionTimeout
                 ? L"File create blocked after decision timeout."
                 : L"File create blocked by user-mode decision.");
-        Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+        Data->IoStatus.Status = STATUS_VIRUS_INFECTED;
         Data->IoStatus.Information = 0;
         return FLT_PREOP_COMPLETE;
     }
@@ -328,7 +335,7 @@ XdowsFileProtectPreSetInformation(
             decision.Decision == XdowsSecurityDecisionTimeout
                 ? L"File rename blocked after decision timeout."
                 : L"File rename blocked by user-mode decision.");
-        Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+        Data->IoStatus.Status = STATUS_VIRUS_INFECTED;
         Data->IoStatus.Information = 0;
         return FLT_PREOP_COMPLETE;
     }

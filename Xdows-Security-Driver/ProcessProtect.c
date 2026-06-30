@@ -13,6 +13,13 @@ Abstract:
 #include "driver.h"
 #include <ntstrsafe.h>
 
+// STATUS_VIRUS_INFECTED maps to the Windows shell message
+// "Operation did not complete successfully because the file contains a virus
+// or potentially unwanted software." Some older WDK headers may not define it.
+#ifndef STATUS_VIRUS_INFECTED
+#define STATUS_VIRUS_INFECTED ((NTSTATUS)0xC0000222L)
+#endif
+
 static BOOLEAN g_ProcessCallbackRegistered;
 
 static
@@ -112,7 +119,7 @@ XdowsProcessNotifyRoutine(
             decision.Decision == XdowsSecurityDecisionTimeout
                 ? L"Process creation blocked after decision timeout."
                 : L"Process creation blocked by user-mode decision.");
-        CreateInfo->CreationStatus = STATUS_ACCESS_DENIED;
+        CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
     }
 }
 
