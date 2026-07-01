@@ -420,11 +420,18 @@ XdowsInjectionPreOperation(
     effectiveDangerous = requestedMask & threatMask;
 
     //
-    // Fast exit: no target, self-targeted, or nothing dangerous. Lock-free.
+    // Fast exit: no target, self-targeted, nothing dangerous, or the request
+    // originates from the connected Xdows Security client process itself.
+    // The client (Xdows Security main process) needs VM/handle access to
+    // perform memory scanning and hook detection; gating it would stall the
+    // scanner and flood the user with consultation pop-ups. SelfProtect
+    // already prevents injection into the client, so trusting its origin is
+    // safe. Lock-free.
     //
     callerProcessId = PsGetCurrentProcessId();
     if (target.TargetProcessId == NULL ||
         target.TargetProcessId == callerProcessId ||
+        callerProcessId == g_XdowsDriverContext.ClientProcessId ||
         effectiveDangerous == 0) {
         return OB_PREOP_SUCCESS;
     }

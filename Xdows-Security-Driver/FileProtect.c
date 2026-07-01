@@ -110,6 +110,49 @@ XdowsFileIsScannablePath(
 }
 
 //
+// Fast-path trust check: files under \Windows\System32\ and \Windows\SysWOW64\
+// are trusted OS binaries that are re-opened constantly (system DLLs, drivers).
+// Scanning them on every FileCreate saturates user-mode scan capacity and
+// indirectly stalls InjectionProtect's user-mode consultation, which surfaces
+// as handle-strip timeouts and UI pop-up floods. The normalized name includes
+// a volume device prefix, so we search for the directory segment anywhere in
+// the path rather than matching a prefix.
+//
+static
+BOOLEAN
+XdowsFileIsSystemDirectory(
+    _In_ PCUNICODE_STRING Path
+    )
+{
+    static const UNICODE_STRING Segments[] = {
+        RTL_CONSTANT_STRING(L"\\Windows\\System32\\"),
+        RTL_CONSTANT_STRING(L"\\Windows\\SysWOW64\\")
+    };
+    ULONG i;
+    ULONG s;
+
+    if (Path == NULL || Path->Buffer == NULL) {
+        return FALSE;
+    }
+
+    for (s = 0; s < RTL_NUMBER_OF(Segments); s++) {
+        if (Path->Length < Segments[s].Length) {
+            continue;
+        }
+        for (i = 0; i + Segments[s].Length <= Path->Length; i += sizeof(WCHAR)) {
+            UNICODE_STRING sub;
+            sub.Buffer = (PWCH)((PUCHAR)Path->Buffer + i);
+            sub.Length = Segments[s].Length;
+            sub.MaximumLength = Segments[s].Length;
+            if (RtlEqualUnicodeString(&sub, (PUNICODE_STRING)&Segments[s], TRUE)) {
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
+//
 // Fetch and parse the normalized name for the current operation. The caller
 // must release *NameInfo with FltReleaseFileNameInformation on success.
 //
@@ -317,6 +360,18 @@ XdowsFilePreCreate(
     }
 
     if (!XdowsFileIsScannablePath(&name->Name)) {
+        FltReleaseFileNameInformation(name);
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    //
+    // Fast-path trust: skip scanning for files under trusted system
+    // directories. These are constantly re-opened OS binaries; scanning
+    // them floods user mode and indirectly stalls injection consultation.
+    // Only the FileCreate path is skipped -- writes and renames are still
+    // scanned because modifying system binaries is itself suspicious.
+    //
+    if (XdowsFileIsSystemDirectory(&name->Name)) {
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }

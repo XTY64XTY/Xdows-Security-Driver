@@ -35,7 +35,13 @@ typedef struct _XDOWS_DRIVER_CONTEXT {
     ULONG PendingEventCount;
     ULONG DroppedEventCount;
     ULONG64 NextEventId;
-    HANDLE ClientProcessId;
+    //
+    // Read lock-free by protection modules (e.g. InjectionProtect's trusted-
+    // source check). Marked volatile so the compiler does not cache a stale
+    // register copy across the Ob callback's fast-exit chain. Writes still
+    // happen under Lock, so volatile only affects readers.
+    //
+    volatile HANDLE ClientProcessId;
     BOOLEAN ClientConnected;
     BOOLEAN Initialized;
     BOOLEAN ProcessProtectionEnabled;
