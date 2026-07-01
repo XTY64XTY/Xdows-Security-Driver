@@ -6,31 +6,77 @@ Module Name:
 
 Abstract:
 
-    Process creation events bridged to user-mode scanning and decisions.
+    Process-launch interception bridge.
+
+    Registers a PsSetCreateProcessNotifyRoutineEx callback. For each new
+    process, the callback assembles an XDOWS_SECURITY_EVENT describing the
+    launch (image path, command line, parent/creator identities) and asks
+    user-mode policy for a verdict within a bounded wait. A Block or Timeout
+    verdict fails the launch by setting CreateInfo->CreationStatus to
+    STATUS_VIRUS_INFECTED, which surfaces to the caller as the Windows shell
+    message "Operation did not complete successfully because the file contains
+    a virus or potentially unwanted software."
+
+    This module is self-contained: it depends only on the process-notify
+    kernel API, the bridge queue, and the shared log facility. A failure here
+    never affects other protection modules.
+
+    The kernel wait timeout is deliberately shorter than the bridge default
+    (5s): process creation is synchronous, and under a FileCreate flood the
+    user-mode scan limiter can saturate, which would otherwise queue process
+    launches behind file scans and freeze the shell. The 2s value still
+    leaves room for a Pro-model scan (~480ms) while keeping the system
+    responsive.
+
+Environment:
+
+    Kernel-mode Driver Framework
 
 --*/
 
 #include "driver.h"
 #include <ntstrsafe.h>
 
-// STATUS_VIRUS_INFECTED maps to the Windows shell message
-// "Operation did not complete successfully because the file contains a virus
-// or potentially unwanted software." Some older WDK headers may not define it.
+//
+// STATUS_VIRUS_INFECTED surfaces to the shell as the virus/potentially
+// unwanted software message. Some older WDK headers may not define it.
+//
 #ifndef STATUS_VIRUS_INFECTED
 #define STATUS_VIRUS_INFECTED ((NTSTATUS)0xC0000222L)
 #endif
 
-static BOOLEAN g_ProcessCallbackRegistered;
+//
+// Synchronous user-mode verdict timeout for process-launch decisions.
+// See module header for the rationale behind the shorter-than-default value.
+//
+#define XDOWS_PROCESS_LAUNCH_VERDICT_TIMEOUT_MS 2000u
 
+typedef struct _XDOWS_PROCESS_CONTEXT {
+    volatile BOOLEAN CallbackRegistered;
+    volatile BOOLEAN ProtectionActive;
+} XDOWS_PROCESS_CONTEXT, *PXDOWS_PROCESS_CONTEXT;
+
+static XDOWS_PROCESS_CONTEXT g_ProcessGuard;
+
+//
+// Copy a UNICODE_STRING into a fixed-width wide buffer with NUL termination.
+// Truncation is silent: the user-mode scanner treats a truncated path as a
+// best-effort hint, not a failure.
+//
+// Implemented via byte-level RtlCopyMemory rather than RtlStringCchCopyNW so
+// the user-mode scanner never receives a partially validated string: we copy
+// the exact byte count the source reports and then force a NUL terminator.
+//
 static
 VOID
-XdowsCopyUnicodeStringToBuffer(
+XdowsProcessCopyUnicodeInto(
     _Out_writes_(DestinationChars) PWCHAR Destination,
-    _In_ size_t DestinationChars,
+    _In_ SIZE_T DestinationChars,
     _In_opt_ PCUNICODE_STRING Source
     )
 {
-    size_t charsToCopy;
+    SIZE_T byteCapacity;
+    SIZE_T byteCount;
 
     if (DestinationChars == 0) {
         return;
@@ -42,17 +88,95 @@ XdowsCopyUnicodeStringToBuffer(
         return;
     }
 
-    charsToCopy = Source->Length / sizeof(WCHAR);
-    if (charsToCopy >= DestinationChars) {
-        charsToCopy = DestinationChars - 1;
+    byteCapacity = (DestinationChars - 1) * sizeof(WCHAR);
+    byteCount = Source->Length;
+    if (byteCount > byteCapacity) {
+        byteCount = byteCapacity;
     }
 
-    if (charsToCopy == 0) {
+    if (byteCount == 0) {
         return;
     }
 
-    RtlStringCchCopyNW(Destination, DestinationChars, Source->Buffer, charsToCopy);
-    Destination[charsToCopy] = UNICODE_NULL;
+    RtlCopyMemory(Destination, Source->Buffer, byteCount);
+    Destination[byteCount / sizeof(WCHAR)] = UNICODE_NULL;
+}
+
+//
+// Assemble a launch event from the create-notify info. Returns FALSE if the
+// caller should skip the event entirely (e.g. wrong IRQL or exit notification).
+//
+static
+BOOLEAN
+XdowsProcessBuildLaunchEvent(
+    _In_ HANDLE ProcessId,
+    _In_ PPS_CREATE_NOTIFY_INFO CreateInfo,
+    _Out_ PXDOWS_SECURITY_EVENT Event
+    )
+{
+    RtlZeroMemory(Event, sizeof(*Event));
+
+    if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+        return FALSE;
+    }
+
+    Event->Header.Size = sizeof(*Event);
+    Event->Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
+    Event->EventId = XdowsAllocateEventId();
+    Event->CorrelationId = Event->EventId;
+    Event->EventType = XdowsSecurityEventProcessCreate;
+    Event->Flags = XdowsSecurityEventFlagUserModeRequired;
+    Event->ProcessId = HandleToULong(ProcessId);
+    Event->ParentProcessId = HandleToULong(CreateInfo->ParentProcessId);
+    Event->CreatingProcessId = HandleToULong(CreateInfo->CreatingThreadId.UniqueProcess);
+    Event->CreatingThreadId = HandleToULong(CreateInfo->CreatingThreadId.UniqueThread);
+    Event->KernelWaitTimeoutMs = XDOWS_PROCESS_LAUNCH_VERDICT_TIMEOUT_MS;
+
+    if (CreateInfo->FileOpenNameAvailable) {
+        Event->Flags |= XdowsSecurityEventFlagFileOpenNameAvailable;
+    }
+
+    XdowsProcessCopyUnicodeInto(
+        Event->ImagePath,
+        XDOWS_SECURITY_MAX_PATH_CHARS,
+        CreateInfo->ImageFileName);
+
+    XdowsProcessCopyUnicodeInto(
+        Event->CommandLine,
+        XDOWS_SECURITY_MAX_COMMAND_CHARS,
+        CreateInfo->CommandLine);
+
+    return TRUE;
+}
+
+//
+// Apply the user-mode verdict to the create-notify info. Block/Timeout fail
+// the launch with STATUS_VIRUS_INFECTED; anything else lets the launch
+// proceed.
+//
+static
+VOID
+XdowsProcessApplyVerdict(
+    _In_ PXDOWS_SECURITY_EVENT Event,
+    _In_ PXDOWS_SECURITY_DECISION Decision,
+    _Inout_ PPS_CREATE_NOTIFY_INFO CreateInfo
+    )
+{
+    if (Decision->Decision != XdowsSecurityDecisionBlock &&
+        Decision->Decision != XdowsSecurityDecisionTimeout) {
+        return;
+    }
+
+    XdowsLogWrite(
+        XdowsSecurityLogWarning,
+        Event->EventId,
+        Event->CorrelationId,
+        L"Process",
+        Decision->Decision == XdowsSecurityDecisionTimeout
+            ? L"Process launch blocked after verdict timeout."
+            : L"Process launch blocked by user-mode verdict.");
+
+    CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
 }
 
 static
@@ -69,58 +193,36 @@ XdowsProcessNotifyRoutine(
 
     UNREFERENCED_PARAMETER(Process);
 
+    //
+    // CreateInfo is NULL for process-exit notifications, which we do not
+    // gate on.
+    //
     if (CreateInfo == NULL) {
         return;
     }
 
-    if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+    if (!XdowsProcessBuildLaunchEvent(ProcessId, CreateInfo, &event)) {
         return;
     }
-
-    RtlZeroMemory(&event, sizeof(event));
-    event.Header.Size = sizeof(event);
-    event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
-    event.EventId = XdowsAllocateEventId();
-    event.CorrelationId = event.EventId;
-    event.EventType = XdowsSecurityEventProcessCreate;
-    event.Flags = XdowsSecurityEventFlagUserModeRequired;
-    event.ProcessId = HandleToULong(ProcessId);
-    event.ParentProcessId = HandleToULong(CreateInfo->ParentProcessId);
-    event.CreatingProcessId = HandleToULong(CreateInfo->CreatingThreadId.UniqueProcess);
-    event.CreatingThreadId = HandleToULong(CreateInfo->CreatingThreadId.UniqueThread);
-    event.KernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
-
-    if (CreateInfo->FileOpenNameAvailable) {
-        event.Flags |= XdowsSecurityEventFlagFileOpenNameAvailable;
-    }
-
-    XdowsCopyUnicodeStringToBuffer(
-        event.ImagePath,
-        XDOWS_SECURITY_MAX_PATH_CHARS,
-        CreateInfo->ImageFileName);
-
-    XdowsCopyUnicodeStringToBuffer(
-        event.CommandLine,
-        XDOWS_SECURITY_MAX_COMMAND_CHARS,
-        CreateInfo->CommandLine);
 
     status = XdowsQueueEventAndWait(&event, &decision);
     if (!NT_SUCCESS(status)) {
-        return;
-    }
-
-    if (decision.Decision == XdowsSecurityDecisionBlock ||
-        decision.Decision == XdowsSecurityDecisionTimeout) {
-        XdowsLogWrite(
+        //
+        // Bridge failure: per spec R02, allow the launch so the system stays
+        // usable. Record the condition locally so it surfaces in the driver
+        // log even if the bridge could not accept the event.
+        //
+        XdowsLogWriteStatus(
             XdowsSecurityLogWarning,
             event.EventId,
             event.CorrelationId,
             L"Process",
-            decision.Decision == XdowsSecurityDecisionTimeout
-                ? L"Process creation blocked after decision timeout."
-                : L"Process creation blocked by user-mode decision.");
-        CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
+            L"Bridge queue failed; launch allowed",
+            status);
+        return;
     }
+
+    XdowsProcessApplyVerdict(&event, &decision, CreateInfo);
 }
 
 NTSTATUS
@@ -130,21 +232,25 @@ XdowsProcessProtectInitialize(
 {
     NTSTATUS status;
 
-    if (g_ProcessCallbackRegistered) {
+    if (g_ProcessGuard.CallbackRegistered) {
         return STATUS_SUCCESS;
     }
 
     status = PsSetCreateProcessNotifyRoutineEx(XdowsProcessNotifyRoutine, FALSE);
-    if (NT_SUCCESS(status)) {
-        g_ProcessCallbackRegistered = TRUE;
-        g_XdowsDriverContext.ProcessProtectionEnabled = TRUE;
-        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Process", L"Process create callback registered.");
-    } else {
+    if (!NT_SUCCESS(status)) {
+        g_ProcessGuard.ProtectionActive = FALSE;
         g_XdowsDriverContext.ProcessProtectionEnabled = FALSE;
-        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"Process", L"Process callback registration failed", status);
+        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"Process",
+            L"Process-notify registration failed", status);
+        return status;
     }
 
-    return status;
+    g_ProcessGuard.CallbackRegistered = TRUE;
+    g_ProcessGuard.ProtectionActive = TRUE;
+    g_XdowsDriverContext.ProcessProtectionEnabled = TRUE;
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Process",
+        L"Process-launch interception active.");
+    return STATUS_SUCCESS;
 }
 
 VOID
@@ -152,12 +258,14 @@ XdowsProcessProtectShutdown(
     VOID
     )
 {
-    if (!g_ProcessCallbackRegistered) {
+    if (!g_ProcessGuard.CallbackRegistered) {
         return;
     }
 
     PsSetCreateProcessNotifyRoutineEx(XdowsProcessNotifyRoutine, TRUE);
-    g_ProcessCallbackRegistered = FALSE;
+    g_ProcessGuard.CallbackRegistered = FALSE;
+    g_ProcessGuard.ProtectionActive = FALSE;
     g_XdowsDriverContext.ProcessProtectionEnabled = FALSE;
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Process", L"Process create callback unregistered.");
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Process",
+        L"Process-launch interception stopped.");
 }
