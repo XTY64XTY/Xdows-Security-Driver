@@ -1,112 +1,188 @@
+/*++
+
+Module Name:
+
+    selfprotect.c
+
+Abstract:
+
+    Self-protection for the Xdows Security user-mode service process.
+
+    The module registers ObRegisterCallbacks for process and thread object
+    types. When an external caller opens a handle to the guarded process (or
+    to a thread owned by it) with dangerous access rights, the pre-operation
+    callback strips those rights in place. Voluntary-exit semantics let the
+    guarded process request temporary relief (e.g. for a self-initiated
+    shutdown) without disabling the whole guard.
+
+    This module is self-contained: it depends only on the kernel object
+    callback API and the shared log facility. It holds no references to other
+    protection modules and any failure here is confined to self-protection.
+
+    Synchronization: all entry points run at PASSIVE_LEVEL (Ob pre-operation
+    callbacks and IOCTL handlers alike), so an EX_PUSH_LOCK is used instead of
+    a spin lock. This avoids raising IRQL to DISPATCH_LEVEL on the handle-open
+    hot path, keeping scheduling latency low.
+
+Environment:
+
+    Kernel-mode Driver Framework
+
+--*/
+
 #include "driver.h"
 #include "selfprotect.h"
 
+//
+// Dangerous process access rights. Stripping these prevents a third party from
+// terminating, injecting into, duplicating, or reconfiguring the guarded
+// process. Values mirror the documented PROCESS_* masks; the header guards
+// tolerate older WDK headers that omit some of them.
+//
+#ifndef PROCESS_TERMINATE
+#define PROCESS_TERMINATE 0x0001
+#endif
+#ifndef PROCESS_CREATE_THREAD
+#define PROCESS_CREATE_THREAD 0x0002
+#endif
+#ifndef PROCESS_SET_SESSIONID
+#define PROCESS_SET_SESSIONID 0x0004
+#endif
+#ifndef PROCESS_VM_OPERATION
+#define PROCESS_VM_OPERATION 0x0008
+#endif
+#ifndef PROCESS_VM_WRITE
+#define PROCESS_VM_WRITE 0x0020
+#endif
+#ifndef PROCESS_DUP_HANDLE
+#define PROCESS_DUP_HANDLE 0x0040
+#endif
+#ifndef PROCESS_SET_INFORMATION
+#define PROCESS_SET_INFORMATION 0x0200
+#endif
 #ifndef PROCESS_SUSPEND_RESUME
 #define PROCESS_SUSPEND_RESUME 0x0800
 #endif
 
-#ifndef PROCESS_TERMINATE
-#define PROCESS_TERMINATE 0x0001
-#endif
-
-#ifndef PROCESS_CREATE_THREAD
-#define PROCESS_CREATE_THREAD 0x0002
-#endif
-
-#ifndef PROCESS_SET_SESSIONID
-#define PROCESS_SET_SESSIONID 0x0004
-#endif
-
-#ifndef PROCESS_VM_OPERATION
-#define PROCESS_VM_OPERATION 0x0008
-#endif
-
-#ifndef PROCESS_VM_WRITE
-#define PROCESS_VM_WRITE 0x0020
-#endif
-
-#ifndef PROCESS_DUP_HANDLE
-#define PROCESS_DUP_HANDLE 0x0040
-#endif
-
-#ifndef PROCESS_SET_INFORMATION
-#define PROCESS_SET_INFORMATION 0x0200
-#endif
-
+//
+// Dangerous thread access rights. Stripping these prevents remote thread
+// hijacking via SetThreadContext / thread termination / token replacement.
+//
 #ifndef THREAD_SET_THREAD_TOKEN
 #define THREAD_SET_THREAD_TOKEN 0x0080
 #endif
 
-#define XDOWS_PROCESS_DANGEROUS_ACCESS \
-    (PROCESS_TERMINATE | PROCESS_CREATE_THREAD | PROCESS_SET_SESSIONID | \
-     PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_DUP_HANDLE | \
-     PROCESS_SET_INFORMATION | PROCESS_SUSPEND_RESUME)
+#define XDOWS_GUARD_PROCESS_RESTRICTED_MASK                              \
+    (PROCESS_TERMINATE        | PROCESS_CREATE_THREAD     |               \
+     PROCESS_SET_SESSIONID    | PROCESS_VM_OPERATION      |               \
+     PROCESS_VM_WRITE         | PROCESS_DUP_HANDLE         |               \
+     PROCESS_SET_INFORMATION  | PROCESS_SUSPEND_RESUME)
 
-#define XDOWS_THREAD_DANGEROUS_ACCESS \
-    (THREAD_TERMINATE | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME | \
-     THREAD_SET_INFORMATION | THREAD_SET_THREAD_TOKEN)
+#define XDOWS_GUARD_THREAD_RESTRICTED_MASK                                \
+    (THREAD_TERMINATE      | THREAD_SET_CONTEXT         |                \
+     THREAD_SUSPEND_RESUME | THREAD_SET_INFORMATION     |                \
+     THREAD_SET_THREAD_TOKEN)
 
-typedef struct _XDOWS_SELF_PROTECT_STATE {
-    KSPIN_LOCK Lock;
-    HANDLE ProcessId;
-    HANDLE MainThreadId;
-    BOOLEAN VoluntaryExit;
-    PVOID ObRegistrationHandle;
-} XDOWS_SELF_PROTECT_STATE, *PXDOWS_SELF_PROTECT_STATE;
+//
+// Single source of truth for the guarded process state. A snapshot is read
+// under the shared lock in one shot, so the callback never observes a torn
+// (ProcessId updated but ExitPermitted stale) view.
+//
+typedef struct _XDOWS_GUARD_SNAPSHOT {
+    BOOLEAN Active;
+    BOOLEAN ExitPermitted;
+    HANDLE  ProcessId;
+} XDOWS_GUARD_SNAPSHOT, *PXDOWS_GUARD_SNAPSHOT;
 
-static XDOWS_SELF_PROTECT_STATE g_SelfProtectState;
+typedef struct _XDOWS_GUARD_CONTEXT {
+    EX_PUSH_LOCK Lock;
+    volatile BOOLEAN Active;
+    volatile BOOLEAN ExitPermitted;
+    volatile HANDLE  GuardedProcessId;
+    volatile HANDLE  PrimaryThreadId;
+    PVOID            CallbackHandle;
+} XDOWS_GUARD_CONTEXT, *PXDOWS_GUARD_CONTEXT;
+
+static XDOWS_GUARD_CONTEXT g_SelfGuard;
+
+//
+// Read the entire guard state in one locked critical section. Callers then
+// branch on the immutable snapshot, eliminating the double-lock pattern used
+// by the previous implementation.
+//
+static
+VOID
+XdowsSelfProtectSnapshotGuard(
+    _Out_ PXDOWS_GUARD_SNAPSHOT Snapshot
+    )
+{
+    Snapshot->Active = FALSE;
+    Snapshot->ExitPermitted = FALSE;
+    Snapshot->ProcessId = NULL;
+
+    ExAcquirePushLockShared(&g_SelfGuard.Lock);
+    Snapshot->Active = g_SelfGuard.Active;
+    Snapshot->ExitPermitted = g_SelfGuard.ExitPermitted;
+    Snapshot->ProcessId = g_SelfGuard.GuardedProcessId;
+    ExReleasePushLockShared(&g_SelfGuard.Lock);
+}
+
+//
+// Resolve the object type into a (target process id, restricted mask) pair.
+// Returns FALSE for object types this module does not handle.
+//
+static
+BOOLEAN
+XdowsSelfProtectResolveTarget(
+    _In_ POB_PRE_OPERATION_INFORMATION Info,
+    _Out_ PHANDLE TargetProcessId,
+    _Out_ ACCESS_MASK* RestrictedMask
+    )
+{
+    if (Info->ObjectType == *PsProcessType) {
+        *TargetProcessId = PsGetProcessId((PEPROCESS)Info->Object);
+        *RestrictedMask = XDOWS_GUARD_PROCESS_RESTRICTED_MASK;
+        return TRUE;
+    }
+
+    if (Info->ObjectType == *PsThreadType) {
+        *TargetProcessId = PsGetThreadProcessId((PETHREAD)Info->Object);
+        *RestrictedMask = XDOWS_GUARD_THREAD_RESTRICTED_MASK;
+        return TRUE;
+    }
+
+    return FALSE;
+}
 
 static
 ACCESS_MASK*
-XdowsSelfProtectDesiredAccess(
-    _Inout_ POB_PRE_OPERATION_INFORMATION Info
+XdowsSelfProtectLocateDesiredAccess(
+    _In_ POB_PRE_OPERATION_INFORMATION Info
     )
 {
     if (Info->Operation == OB_OPERATION_HANDLE_CREATE) {
         return &Info->Parameters->CreateHandleInformation.DesiredAccess;
     }
-
     if (Info->Operation == OB_OPERATION_HANDLE_DUPLICATE) {
         return &Info->Parameters->DuplicateHandleInformation.DesiredAccess;
     }
-
     return NULL;
 }
 
-BOOLEAN
-XdowsSelfProtectIsProcessProtected(
-    _In_ HANDLE ProcessId
-    )
-{
-    KIRQL oldIrql;
-    BOOLEAN isProtected;
-
-    KeAcquireSpinLock(&g_SelfProtectState.Lock, &oldIrql);
-    isProtected = g_SelfProtectState.ProcessId != NULL &&
-        g_SelfProtectState.ProcessId == ProcessId &&
-        !g_SelfProtectState.VoluntaryExit;
-    KeReleaseSpinLock(&g_SelfProtectState.Lock, oldIrql);
-
-    return isProtected;
-}
-
+//
+// Apply the restriction in place and report whether any bits were stripped.
+//
 static
 BOOLEAN
-XdowsSelfProtectShouldProtectTarget(
-    _In_ HANDLE TargetProcessId,
-    _Out_ PBOOLEAN VoluntaryExit
+XdowsSelfProtectStripAccess(
+    _Inout_ ACCESS_MASK* DesiredAccess,
+    _In_ ACCESS_MASK RestrictedMask
     )
 {
-    KIRQL oldIrql;
-    BOOLEAN shouldProtect;
+    ACCESS_MASK before = *DesiredAccess;
 
-    KeAcquireSpinLock(&g_SelfProtectState.Lock, &oldIrql);
-    *VoluntaryExit = g_SelfProtectState.VoluntaryExit;
-    shouldProtect = g_SelfProtectState.ProcessId != NULL &&
-        g_SelfProtectState.ProcessId == TargetProcessId;
-    KeReleaseSpinLock(&g_SelfProtectState.Lock, oldIrql);
-
-    return shouldProtect;
+    *DesiredAccess &= ~RestrictedMask;
+    return (*DesiredAccess != before);
 }
 
 static
@@ -117,46 +193,50 @@ XdowsSelfProtectPreOperation(
     )
 {
     ACCESS_MASK* desiredAccess;
-    ACCESS_MASK maskToRemove = 0;
+    ACCESS_MASK restrictedMask = 0;
     HANDLE targetProcessId = NULL;
-    HANDLE currentProcessId = PsGetCurrentProcessId();
-    BOOLEAN voluntaryExit = FALSE;
-    ACCESS_MASK originalAccess;
+    HANDLE callerProcessId;
+    XDOWS_GUARD_SNAPSHOT snapshot;
 
     UNREFERENCED_PARAMETER(RegistrationContext);
 
-    desiredAccess = XdowsSelfProtectDesiredAccess(Info);
+    desiredAccess = XdowsSelfProtectLocateDesiredAccess(Info);
     if (desiredAccess == NULL || *desiredAccess == 0) {
         return OB_PREOP_SUCCESS;
     }
 
-    if (Info->ObjectType == *PsProcessType) {
-        targetProcessId = PsGetProcessId((PEPROCESS)Info->Object);
-        maskToRemove = XDOWS_PROCESS_DANGEROUS_ACCESS;
-    } else if (Info->ObjectType == *PsThreadType) {
-        targetProcessId = PsGetThreadProcessId((PETHREAD)Info->Object);
-        maskToRemove = XDOWS_THREAD_DANGEROUS_ACCESS;
-    } else {
+    if (!XdowsSelfProtectResolveTarget(Info, &targetProcessId, &restrictedMask)) {
         return OB_PREOP_SUCCESS;
     }
 
+    //
+    // Fast exit: no target, self-targeted, or nothing dangerous requested.
+    // These checks need no lock and keep the hot path lock-free.
+    //
+    callerProcessId = PsGetCurrentProcessId();
     if (targetProcessId == NULL ||
-        targetProcessId == currentProcessId ||
-        !XdowsSelfProtectShouldProtectTarget(targetProcessId, &voluntaryExit) ||
-        voluntaryExit) {
+        targetProcessId == callerProcessId ||
+        (*desiredAccess & restrictedMask) == 0) {
         return OB_PREOP_SUCCESS;
     }
 
-    originalAccess = *desiredAccess;
-    *desiredAccess &= ~maskToRemove;
-    if (*desiredAccess != originalAccess) {
+    XdowsSelfProtectSnapshotGuard(&snapshot);
+
+    if (!snapshot.Active ||
+        snapshot.ExitPermitted ||
+        snapshot.ProcessId != targetProcessId) {
+        return OB_PREOP_SUCCESS;
+    }
+
+    if (XdowsSelfProtectStripAccess(desiredAccess, restrictedMask)) {
         XdowsLogWrite(
             XdowsSecurityLogWarning,
             0,
             0,
             L"SelfProtect",
-            L"Dangerous handle permissions stripped from protected process.");
+            L"Restricted handle rights stripped from guarded process.");
     }
+
     return OB_PREOP_SUCCESS;
 }
 
@@ -170,8 +250,13 @@ XdowsSelfProtectInitialize(
     UNICODE_STRING altitude;
     NTSTATUS status;
 
-    RtlZeroMemory(&g_SelfProtectState, sizeof(g_SelfProtectState));
-    KeInitializeSpinLock(&g_SelfProtectState.Lock);
+    RtlZeroMemory(&g_SelfGuard, sizeof(g_SelfGuard));
+    ExInitializePushLock(&g_SelfGuard.Lock);
+    g_SelfGuard.Active = FALSE;
+    g_SelfGuard.ExitPermitted = FALSE;
+    g_SelfGuard.GuardedProcessId = NULL;
+    g_SelfGuard.PrimaryThreadId = NULL;
+    g_SelfGuard.CallbackHandle = NULL;
 
     RtlZeroMemory(operations, sizeof(operations));
     operations[0].ObjectType = PsProcessType;
@@ -189,15 +274,17 @@ XdowsSelfProtectInitialize(
     registration.Altitude = altitude;
     registration.OperationRegistration = operations;
 
-    status = ObRegisterCallbacks(&registration, &g_SelfProtectState.ObRegistrationHandle);
+    status = ObRegisterCallbacks(&registration, &g_SelfGuard.CallbackHandle);
     if (!NT_SUCCESS(status)) {
-        g_SelfProtectState.ObRegistrationHandle = NULL;
-        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"SelfProtect", L"Self-protect callback registration failed", status);
-    } else {
-        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect", L"Self-protect callbacks registered.");
+        g_SelfGuard.CallbackHandle = NULL;
+        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"SelfProtect",
+            L"Object callback registration failed", status);
+        return status;
     }
 
-    return status;
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
+        L"Self-protection callbacks registered.");
+    return STATUS_SUCCESS;
 }
 
 VOID
@@ -205,12 +292,19 @@ XdowsSelfProtectShutdown(
     VOID
     )
 {
-    PVOID handle = g_SelfProtectState.ObRegistrationHandle;
-    g_SelfProtectState.ObRegistrationHandle = NULL;
+    PVOID handle;
+
+    handle = g_SelfGuard.CallbackHandle;
+    g_SelfGuard.CallbackHandle = NULL;
 
     if (handle != NULL) {
+        //
+        // ObUnRegisterCallbacks drains in-flight callbacks, so it is safe to
+        // clear the registration state afterward without extra locking.
+        //
         ObUnRegisterCallbacks(handle);
-        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect", L"Self-protect callbacks unregistered.");
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
+            L"Self-protection callbacks unregistered.");
     }
 
     XdowsSelfProtectClearRegistration();
@@ -223,21 +317,25 @@ XdowsSelfProtectRegisterProcess(
     _In_ ULONG Flags
     )
 {
-    KIRQL oldIrql;
-
     UNREFERENCED_PARAMETER(Flags);
 
-    if (ProcessId == 0 || ProcessId == 4) {
+    //
+    // Reject the idle/System (PID 4) pseudo-process and the invalid zero PID.
+    //
+    if (ProcessId == 0 || ProcessId == 4 ||
+        MainThreadId == 0) {
         return STATUS_INVALID_PARAMETER;
     }
 
-    KeAcquireSpinLock(&g_SelfProtectState.Lock, &oldIrql);
-    g_SelfProtectState.ProcessId = ULongToHandle(ProcessId);
-    g_SelfProtectState.MainThreadId = ULongToHandle(MainThreadId);
-    g_SelfProtectState.VoluntaryExit = FALSE;
-    KeReleaseSpinLock(&g_SelfProtectState.Lock, oldIrql);
+    ExAcquirePushLockExclusive(&g_SelfGuard.Lock);
+    g_SelfGuard.GuardedProcessId = ULongToHandle(ProcessId);
+    g_SelfGuard.PrimaryThreadId = ULongToHandle(MainThreadId);
+    g_SelfGuard.ExitPermitted = FALSE;
+    g_SelfGuard.Active = TRUE;
+    ExReleasePushLockExclusive(&g_SelfGuard.Lock);
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect", L"Protected process registered.");
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
+        L"Guarded process registered.");
     return STATUS_SUCCESS;
 }
 
@@ -247,15 +345,15 @@ XdowsSelfProtectSetVoluntaryExit(
     _In_ BOOLEAN IsVoluntaryExit
     )
 {
-    KIRQL oldIrql;
     NTSTATUS status = STATUS_NOT_FOUND;
 
-    KeAcquireSpinLock(&g_SelfProtectState.Lock, &oldIrql);
-    if (g_SelfProtectState.ProcessId == ULongToHandle(ProcessId)) {
-        g_SelfProtectState.VoluntaryExit = IsVoluntaryExit;
+    ExAcquirePushLockExclusive(&g_SelfGuard.Lock);
+    if (g_SelfGuard.Active &&
+        g_SelfGuard.GuardedProcessId == ULongToHandle(ProcessId)) {
+        g_SelfGuard.ExitPermitted = IsVoluntaryExit;
         status = STATUS_SUCCESS;
     }
-    KeReleaseSpinLock(&g_SelfProtectState.Lock, oldIrql);
+    ExReleasePushLockExclusive(&g_SelfGuard.Lock);
 
     if (NT_SUCCESS(status)) {
         XdowsLogWrite(
@@ -263,7 +361,8 @@ XdowsSelfProtectSetVoluntaryExit(
             0,
             0,
             L"SelfProtect",
-            IsVoluntaryExit ? L"Voluntary exit enabled." : L"Voluntary exit disabled.");
+            IsVoluntaryExit ? L"Voluntary exit acknowledged."
+                             : L"Voluntary exit revoked.");
     }
     return status;
 }
@@ -273,13 +372,26 @@ XdowsSelfProtectClearRegistration(
     VOID
     )
 {
-    KIRQL oldIrql;
+    ExAcquirePushLockExclusive(&g_SelfGuard.Lock);
+    g_SelfGuard.Active = FALSE;
+    g_SelfGuard.ExitPermitted = FALSE;
+    g_SelfGuard.GuardedProcessId = NULL;
+    g_SelfGuard.PrimaryThreadId = NULL;
+    ExReleasePushLockExclusive(&g_SelfGuard.Lock);
 
-    KeAcquireSpinLock(&g_SelfProtectState.Lock, &oldIrql);
-    g_SelfProtectState.ProcessId = NULL;
-    g_SelfProtectState.MainThreadId = NULL;
-    g_SelfProtectState.VoluntaryExit = FALSE;
-    KeReleaseSpinLock(&g_SelfProtectState.Lock, oldIrql);
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
+        L"Guarded process registration cleared.");
+}
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect", L"Protected process registration cleared.");
+BOOLEAN
+XdowsSelfProtectIsProcessProtected(
+    _In_ HANDLE ProcessId
+    )
+{
+    XDOWS_GUARD_SNAPSHOT snapshot;
+
+    XdowsSelfProtectSnapshotGuard(&snapshot);
+    return snapshot.Active &&
+           !snapshot.ExitPermitted &&
+           snapshot.ProcessId == ProcessId;
 }
