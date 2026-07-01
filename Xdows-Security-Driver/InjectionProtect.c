@@ -1,3 +1,35 @@
+/*++
+
+Module Name:
+
+    injectionprotect.c
+
+Abstract:
+
+    Cross-process injection prevention for arbitrary target processes.
+
+    Unlike SelfProtect (which guards the Xdows Security process itself), this
+    module watches handle opens to *any* process or thread and consults
+    user-mode policy when dangerous access rights are requested. An Allow
+    verdict is cached per (source, target, target-creation-time) tuple so
+    repeated handle requests (e.g. explorer enumerating processes) do not
+    flood user mode. Block verdicts strip the dangerous rights in place.
+
+    This module is self-contained: it depends only on the kernel object
+    callback API, the bridge queue, and the shared log facility. A failure
+    here never affects other protection modules.
+
+    Synchronization: all entry points run at PASSIVE_LEVEL (Ob pre-operation
+    callbacks and IOCTL/Initialize/Shutdown alike), so an EX_PUSH_LOCK guards
+    the verdict cache instead of a spin lock, keeping the hot path off
+    DISPATCH_LEVEL.
+
+Environment:
+
+    Kernel-mode Driver Framework
+
+--*/
+
 #include "driver.h"
 #include <ntstrsafe.h>
 
@@ -10,225 +42,297 @@ NTKERNELAPI PEPROCESS PsGetThreadProcess(_In_ PETHREAD Thread);
 #ifndef PROCESS_SUSPEND_RESUME
 #define PROCESS_SUSPEND_RESUME 0x0800
 #endif
-
 #ifndef PROCESS_CREATE_THREAD
 #define PROCESS_CREATE_THREAD 0x0002
 #endif
-
 #ifndef PROCESS_VM_OPERATION
 #define PROCESS_VM_OPERATION 0x0008
 #endif
-
 #ifndef PROCESS_VM_WRITE
 #define PROCESS_VM_WRITE 0x0020
 #endif
-
 #ifndef PROCESS_DUP_HANDLE
 #define PROCESS_DUP_HANDLE 0x0040
 #endif
 
 //
-// Core dangerous process access rights for injection: CreateRemoteThread,
-// WriteProcessMemory, and DuplicateHandle into the target process form the
-// classic DLL injection primitive. Each is suspicious on its own.
+// Primary injection primitive: remote thread creation, memory writes, and
+// handle duplication into the target. Each is dangerous on its own.
 //
-#define XDOWS_INJECTION_PROCESS_ACCESS_CORE \
+#define XDOWS_INJECTION_PROCESS_PRIMARY_MASK    \
     (PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | \
      PROCESS_DUP_HANDLE)
 
 //
-// PROCESS_SUSPEND_RESUME alone is widely used by job objects, profilers, and
-// debuggers, producing high false positives. Treat it as suspicious only when
-// requested together with PROCESS_VM_WRITE (suspend target then write memory
-// is a typical injection prefix).
+// PROCESS_SUSPEND_RESUME is benign alone (jobs, profilers, debuggers) and
+// produces high false-positive rates. It is treated as a threat only when
+// paired with PROCESS_VM_WRITE, which forms the classic "suspend then write"
+// injection prefix.
 //
-#define XDOWS_INJECTION_PROCESS_SUSPEND_RESUME_ACCESS \
-    (PROCESS_SUSPEND_RESUME)
-
-#define XDOWS_INJECTION_PROCESS_VM_WRITE_ACCESS \
-    (PROCESS_VM_WRITE)
+#define XDOWS_INJECTION_PROCESS_SUSPEND_RESUME_MASK    (PROCESS_SUSPEND_RESUME)
+#define XDOWS_INJECTION_PROCESS_VM_WRITE_MASK          (PROCESS_VM_WRITE)
 
 //
-// Thread context modification is the core of SetThreadContext-based injection
-// and is suspicious on its own.
+// Thread-context modification is the SetThreadContext injection primitive and
+// is dangerous on its own.
 //
-#define XDOWS_INJECTION_THREAD_ACCESS_CORE \
-    (THREAD_SET_CONTEXT)
+#define XDOWS_INJECTION_THREAD_PRIMARY_MASK    (THREAD_SET_CONTEXT)
 
 //
-// THREAD_SUSPEND_RESUME alone is legitimate and frequent (debuggers, samplers,
-// task manager). Treat it as suspicious only when requested together with
-// THREAD_SET_CONTEXT (suspend thread then modify its context is a typical
-// injection prefix).
+// THREAD_SUSPEND_RESUME alone is legitimate (debuggers, samplers). It is a
+// threat only when paired with THREAD_SET_CONTEXT ("suspend then hijack").
 //
-#define XDOWS_INJECTION_THREAD_SUSPEND_RESUME_ACCESS \
-    (THREAD_SUSPEND_RESUME)
+#define XDOWS_INJECTION_THREAD_SUSPEND_RESUME_MASK   (THREAD_SUSPEND_RESUME)
+#define XDOWS_INJECTION_THREAD_SET_CONTEXT_MASK       (THREAD_SET_CONTEXT)
 
 //
-// Synchronous handle-decision wait timeout. The previous 3000ms value would
-// stall every cross-process handle operation for 3 seconds when user mode was
-// unresponsive, making the system feel frozen. 500ms covers normal user-mode
-// round trips.
+// Synchronous user-mode consultation timeout. 500ms covers normal round
+// trips; a longer value would freeze every cross-process handle open when
+// user mode is unresponsive.
 //
-#define XDOWS_INJECTION_KERNEL_WAIT_TIMEOUT_MS 500u
+#define XDOWS_INJECTION_CONSULT_TIMEOUT_MS    500u
 
 //
-// Short-lived Allow decision cache. Repeated handle requests from the same
-// source to the same target (e.g. explorer enumerating processes) should not
-// repeatedly prompt user mode. Only Allow is cached; Block/Timeout are not.
-// TTL matches the spec's "explicit threat release" value of 5 minutes.
-// The cache key includes the target process creation time to resist PID reuse.
+// Short-lived Allow verdict cache. Only Allow is cached; Block/Timeout are
+// not. The cache key includes the target process creation time to resist PID
+// reuse. TTL matches the spec's "explicit threat release" value.
 //
-#define XDOWS_INJECTION_CACHE_CAPACITY 64u
-#define XDOWS_INJECTION_CACHE_TTL_MS (5u * 60u * 1000u)
-#define XDOWS_INJECTION_CACHE_TTL_100NS ((LONGLONG)XDOWS_INJECTION_CACHE_TTL_MS * 10000LL)
+#define XDOWS_INJECTION_VERDICT_SLOTS         64u
+#define XDOWS_INJECTION_VERDICT_TTL_MS       (5u * 60u * 1000u)
+#define XDOWS_INJECTION_VERDICT_TTL_100NS     ((LONGLONG)XDOWS_INJECTION_VERDICT_TTL_MS * 10000LL)
 
-typedef struct _XDOWS_INJECTION_CACHE_ENTRY {
-    ULONG SourceProcessId;
-    ULONG TargetProcessId;
-    ULONGLONG TargetProcessCreateTime;
-    ACCESS_MASK AllowedDangerousMask;
-    LARGE_INTEGER AllowTime;
-    BOOLEAN InUse;
-} XDOWS_INJECTION_CACHE_ENTRY, *PXDOWS_INJECTION_CACHE_ENTRY;
+//
+// A single verdict slot. InUse=FALSE means the slot is free.
+//
+typedef struct _XDOWS_INJECTION_VERDICT_SLOT {
+    ULONG          SourceProcessId;
+    ULONG          TargetProcessId;
+    ULONGLONG      TargetCreateTime;
+    ACCESS_MASK    GrantedMask;
+    LARGE_INTEGER  GrantedAt;
+    BOOLEAN        InUse;
+} XDOWS_INJECTION_VERDICT_SLOT, *PXDOWS_INJECTION_VERDICT_SLOT;
 
-static PVOID g_InjectionObRegistration;
-static XDOWS_INJECTION_CACHE_ENTRY g_InjectionCache[XDOWS_INJECTION_CACHE_CAPACITY];
-static KSPIN_LOCK g_InjectionCacheLock;
+typedef struct _XDOWS_INJECTION_CONTEXT {
+    EX_PUSH_LOCK                 Lock;
+    XDOWS_INJECTION_VERDICT_SLOT Verdicts[XDOWS_INJECTION_VERDICT_SLOTS];
+    PVOID                        CallbackHandle;
+} XDOWS_INJECTION_CONTEXT, *PXDOWS_INJECTION_CONTEXT;
+
+static XDOWS_INJECTION_CONTEXT g_Injection;
+
+//
+// Description of a single handle-open target, produced by ResolveTarget.
+//
+typedef struct _XDOWS_INJECTION_TARGET {
+    HANDLE     TargetProcessId;
+    ULONG      TargetThreadId;
+    ULONG      EventType;
+    ULONGLONG  TargetCreateTime;
+    ACCESS_MASK PrimaryMask;
+    ACCESS_MASK ConditionalMask;
+    ACCESS_MASK ConditionalTrigger;
+} XDOWS_INJECTION_TARGET, *PXDOWS_INJECTION_TARGET;
+
+typedef const XDOWS_INJECTION_TARGET *PCXDOWS_INJECTION_TARGET;
 
 static
 ACCESS_MASK*
-XdowsInjectionDesiredAccess(
-    _Inout_ POB_PRE_OPERATION_INFORMATION Info
+XdowsInjectionDesiredAccessField(
+    _In_ POB_PRE_OPERATION_INFORMATION Info
     )
 {
     if (Info->Operation == OB_OPERATION_HANDLE_CREATE) {
         return &Info->Parameters->CreateHandleInformation.DesiredAccess;
     }
-
     if (Info->Operation == OB_OPERATION_HANDLE_DUPLICATE) {
         return &Info->Parameters->DuplicateHandleInformation.DesiredAccess;
     }
-
     return NULL;
 }
 
 //
-// Allow cache lookup. Uses (source PID, target PID, target creation time)
-// superset matching: a hit occurs when the cached allowed dangerous set
-// covers all dangerous bits of the current request. Expired entries are
-// lazily cleared.
+// Resolve the object into a target descriptor. ConditionalMask bits are only
+// counted as dangerous when the request also contains ConditionalTrigger
+// (e.g. SUSPEND_RESUME only matters together with VM_WRITE).
 //
 static
 BOOLEAN
-XdowsInjectionCacheLookup(
+XdowsInjectionResolveTarget(
+    _In_ POB_PRE_OPERATION_INFORMATION Info,
+    _Out_ PXDOWS_INJECTION_TARGET Target
+    )
+{
+    RtlZeroMemory(Target, sizeof(*Target));
+
+    if (Info->ObjectType == *PsProcessType) {
+        PEPROCESS proc = (PEPROCESS)Info->Object;
+        Target->TargetProcessId = PsGetProcessId(proc);
+        Target->EventType = XdowsSecurityEventProcessHandle;
+        Target->TargetCreateTime = PsGetProcessCreateTimeQuadPart(proc);
+        Target->PrimaryMask = XDOWS_INJECTION_PROCESS_PRIMARY_MASK;
+        Target->ConditionalMask = XDOWS_INJECTION_PROCESS_SUSPEND_RESUME_MASK;
+        Target->ConditionalTrigger = XDOWS_INJECTION_PROCESS_VM_WRITE_MASK;
+        return TRUE;
+    }
+
+    if (Info->ObjectType == *PsThreadType) {
+        PETHREAD thd = (PETHREAD)Info->Object;
+        Target->TargetProcessId = PsGetThreadProcessId(thd);
+        Target->TargetThreadId = HandleToULong(PsGetThreadId(thd));
+        Target->EventType = XdowsSecurityEventThreadHandle;
+        Target->TargetCreateTime = PsGetProcessCreateTimeQuadPart(PsGetThreadProcess(thd));
+        Target->PrimaryMask = XDOWS_INJECTION_THREAD_PRIMARY_MASK;
+        Target->ConditionalMask = XDOWS_INJECTION_THREAD_SUSPEND_RESUME_MASK;
+        Target->ConditionalTrigger = XDOWS_INJECTION_THREAD_SET_CONTEXT_MASK;
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+//
+// Compute the effective dangerous mask for this request. Primary bits are
+// always dangerous; conditional bits only when their trigger is also present.
+//
+static
+ACCESS_MASK
+XdowsInjectionComputeThreatMask(
+    _In_ PCXDOWS_INJECTION_TARGET Target,
+    _In_ ACCESS_MASK RequestedMask
+    )
+{
+    ACCESS_MASK mask = Target->PrimaryMask;
+
+    if ((RequestedMask & Target->ConditionalMask) &&
+        (RequestedMask & Target->ConditionalTrigger)) {
+        mask |= Target->ConditionalMask;
+    }
+    return mask;
+}
+
+//
+// Verdict cache lookup. A hit requires an exact (source, target, creation
+// time) match, an unexpired entry, and the cached GrantedMask covering all
+// requested dangerous bits. Expired entries are lazily invalidated.
+//
+// Exclusive (not shared) access is taken because expired slots are invalidated
+// in place. The 64-slot linear scan is O(1)-ish and never blocks on I/O, so
+// exclusive access keeps the cache consistent without measurable latency.
+//
+static
+BOOLEAN
+XdowsInjectionLookupVerdict(
     _In_ ULONG SourceProcessId,
     _In_ ULONG TargetProcessId,
-    _In_ ULONGLONG TargetProcessCreateTime,
+    _In_ ULONGLONG TargetCreateTime,
     _In_ ACCESS_MASK RequestedDangerous
     )
 {
-    KIRQL oldIrql;
     LARGE_INTEGER now;
     BOOLEAN hit = FALSE;
     ULONG i;
 
     KeQuerySystemTime(&now);
-    KeAcquireSpinLock(&g_InjectionCacheLock, &oldIrql);
-    for (i = 0; i < XDOWS_INJECTION_CACHE_CAPACITY; i++) {
-        PXDOWS_INJECTION_CACHE_ENTRY entry = &g_InjectionCache[i];
-        if (!entry->InUse) {
+    ExAcquirePushLockExclusive(&g_Injection.Lock);
+
+    for (i = 0; i < XDOWS_INJECTION_VERDICT_SLOTS; i++) {
+        PXDOWS_INJECTION_VERDICT_SLOT slot = &g_Injection.Verdicts[i];
+        if (!slot->InUse) {
             continue;
         }
-        if (entry->SourceProcessId != SourceProcessId ||
-            entry->TargetProcessId != TargetProcessId ||
-            entry->TargetProcessCreateTime != TargetProcessCreateTime) {
+        if (slot->SourceProcessId != SourceProcessId ||
+            slot->TargetProcessId != TargetProcessId ||
+            slot->TargetCreateTime != TargetCreateTime) {
             continue;
         }
-        if (now.QuadPart - entry->AllowTime.QuadPart > XDOWS_INJECTION_CACHE_TTL_100NS) {
-            entry->InUse = FALSE;
+        if (now.QuadPart - slot->GrantedAt.QuadPart > XDOWS_INJECTION_VERDICT_TTL_100NS) {
+            slot->InUse = FALSE;
             continue;
         }
-        if ((RequestedDangerous & ~entry->AllowedDangerousMask) == 0) {
+        if ((RequestedDangerous & ~slot->GrantedMask) == 0) {
             hit = TRUE;
             break;
         }
     }
-    KeReleaseSpinLock(&g_InjectionCacheLock, oldIrql);
+
+    ExReleasePushLockExclusive(&g_Injection.Lock);
     return hit;
 }
 
 //
-// Record an Allow decision. If an existing (source, target, creation time)
-// entry is found, merge the rights and refresh the time; otherwise take a
-// free slot or replace the oldest entry.
+// Record an Allow verdict. An existing matching entry merges the rights and
+// refreshes the timestamp; otherwise the first free slot (or the oldest) is
+// taken. Requires exclusive access.
 //
 static
 VOID
-XdowsInjectionCacheRecordAllow(
+XdowsInjectionRecordVerdict(
     _In_ ULONG SourceProcessId,
     _In_ ULONG TargetProcessId,
-    _In_ ULONGLONG TargetProcessCreateTime,
-    _In_ ACCESS_MASK AllowedDangerous
+    _In_ ULONGLONG TargetCreateTime,
+    _In_ ACCESS_MASK GrantedDangerous
     )
 {
-    KIRQL oldIrql;
     LARGE_INTEGER now;
-    PXDOWS_INJECTION_CACHE_ENTRY target = NULL;
-    PXDOWS_INJECTION_CACHE_ENTRY oldest = NULL;
+    PXDOWS_INJECTION_VERDICT_SLOT chosen = NULL;
+    PXDOWS_INJECTION_VERDICT_SLOT oldest = NULL;
     LONGLONG oldestTime = 0x7FFFFFFFFFFFFFFFLL;
     ULONG i;
 
     KeQuerySystemTime(&now);
-    KeAcquireSpinLock(&g_InjectionCacheLock, &oldIrql);
+    ExAcquirePushLockExclusive(&g_Injection.Lock);
 
-    for (i = 0; i < XDOWS_INJECTION_CACHE_CAPACITY; i++) {
-        PXDOWS_INJECTION_CACHE_ENTRY entry = &g_InjectionCache[i];
-        if (entry->InUse &&
-            entry->SourceProcessId == SourceProcessId &&
-            entry->TargetProcessId == TargetProcessId &&
-            entry->TargetProcessCreateTime == TargetProcessCreateTime) {
-            target = entry;
+    for (i = 0; i < XDOWS_INJECTION_VERDICT_SLOTS; i++) {
+        PXDOWS_INJECTION_VERDICT_SLOT slot = &g_Injection.Verdicts[i];
+        if (slot->InUse &&
+            slot->SourceProcessId == SourceProcessId &&
+            slot->TargetProcessId == TargetProcessId &&
+            slot->TargetCreateTime == TargetCreateTime) {
+            chosen = slot;
             break;
         }
     }
 
-    if (target != NULL) {
-        target->AllowedDangerousMask |= AllowedDangerous;
-        target->AllowTime = now;
+    if (chosen != NULL) {
+        chosen->GrantedMask |= GrantedDangerous;
+        chosen->GrantedAt = now;
     } else {
-        for (i = 0; i < XDOWS_INJECTION_CACHE_CAPACITY; i++) {
-            PXDOWS_INJECTION_CACHE_ENTRY entry = &g_InjectionCache[i];
-            if (!entry->InUse) {
-                target = entry;
+        for (i = 0; i < XDOWS_INJECTION_VERDICT_SLOTS; i++) {
+            PXDOWS_INJECTION_VERDICT_SLOT slot = &g_Injection.Verdicts[i];
+            if (!slot->InUse) {
+                chosen = slot;
                 break;
             }
-            if (entry->AllowTime.QuadPart < oldestTime) {
-                oldestTime = entry->AllowTime.QuadPart;
-                oldest = entry;
+            if (slot->GrantedAt.QuadPart < oldestTime) {
+                oldestTime = slot->GrantedAt.QuadPart;
+                oldest = slot;
             }
         }
-        if (target == NULL) {
-            target = oldest;
+        if (chosen == NULL) {
+            chosen = oldest;
         }
-        target->SourceProcessId = SourceProcessId;
-        target->TargetProcessId = TargetProcessId;
-        target->TargetProcessCreateTime = TargetProcessCreateTime;
-        target->AllowedDangerousMask = AllowedDangerous;
-        target->AllowTime = now;
-        target->InUse = TRUE;
+        chosen->SourceProcessId = SourceProcessId;
+        chosen->TargetProcessId = TargetProcessId;
+        chosen->TargetCreateTime = TargetCreateTime;
+        chosen->GrantedMask = GrantedDangerous;
+        chosen->GrantedAt = now;
+        chosen->InUse = TRUE;
     }
 
-    KeReleaseSpinLock(&g_InjectionCacheLock, oldIrql);
+    ExReleasePushLockExclusive(&g_Injection.Lock);
 }
 
+//
+// Ask user-mode policy for a decision on the dangerous handle request.
+// Returns TRUE on Allow, FALSE on Block/Timeout/error.
+//
 static
 BOOLEAN
-XdowsInjectionAskUser(
-    _In_ ULONG EventType,
-    _In_ ULONG TargetProcessId,
-    _In_ ULONG TargetThreadId,
+XdowsInjectionConsultUser(
+    _In_ PCXDOWS_INJECTION_TARGET Target,
     _In_ ACCESS_MASK DesiredAccess,
+    _In_ ULONG SourceProcessId,
     _Out_opt_ PULONGLONG EventId,
     _Out_opt_ PULONGLONG CorrelationId
     )
@@ -246,13 +350,13 @@ XdowsInjectionAskUser(
     event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
     event.EventId = XdowsAllocateEventId();
     event.CorrelationId = event.EventId;
-    event.EventType = EventType;
+    event.EventType = Target->EventType;
     event.Flags = XdowsSecurityEventFlagUserModeRequired;
-    event.ProcessId = TargetProcessId;
-    event.CreatingProcessId = HandleToULong(PsGetCurrentProcessId());
+    event.ProcessId = HandleToULong(Target->TargetProcessId);
+    event.ParentProcessId = Target->TargetThreadId;
+    event.CreatingProcessId = SourceProcessId;
     event.CreatingThreadId = HandleToULong(PsGetCurrentThreadId());
-    event.ParentProcessId = TargetThreadId;
-    event.KernelWaitTimeoutMs = XDOWS_INJECTION_KERNEL_WAIT_TIMEOUT_MS;
+    event.KernelWaitTimeoutMs = XDOWS_INJECTION_CONSULT_TIMEOUT_MS;
 
     (VOID)RtlStringCchPrintfW(
         event.CommandLine,
@@ -274,7 +378,7 @@ XdowsInjectionAskUser(
             event.EventId,
             event.CorrelationId,
             L"Injection",
-            L"Sensitive handle decision failed",
+            L"User-mode consultation failed",
             status);
         return FALSE;
     }
@@ -290,89 +394,75 @@ XdowsInjectionPreOperation(
     )
 {
     ACCESS_MASK* desiredAccess;
-    ACCESS_MASK dangerousMask;
     ACCESS_MASK requestedMask;
+    ACCESS_MASK threatMask;
     ACCESS_MASK effectiveDangerous;
-    HANDLE targetProcessId;
-    HANDLE targetThreadId = NULL;
-    ULONG eventType;
+    XDOWS_INJECTION_TARGET target;
+    HANDLE callerProcessId;
     ULONG sourcePid;
-    ULONG targetPid;
-    ULONGLONG targetCreateTime = 0;
     ULONGLONG eventId = 0;
     ULONGLONG correlationId = 0;
 
     UNREFERENCED_PARAMETER(RegistrationContext);
 
-    desiredAccess = XdowsInjectionDesiredAccess(Info);
+    desiredAccess = XdowsInjectionDesiredAccessField(Info);
     if (desiredAccess == NULL || *desiredAccess == 0) {
         return OB_PREOP_SUCCESS;
     }
 
     requestedMask = *desiredAccess;
 
-    if (Info->ObjectType == *PsProcessType) {
-        PEPROCESS targetProcess = (PEPROCESS)Info->Object;
-        targetProcessId = PsGetProcessId(targetProcess);
-        eventType = XdowsSecurityEventProcessHandle;
-        dangerousMask = XDOWS_INJECTION_PROCESS_ACCESS_CORE;
-        // PROCESS_SUSPEND_RESUME is suspicious only together with PROCESS_VM_WRITE
-        if ((requestedMask & XDOWS_INJECTION_PROCESS_SUSPEND_RESUME_ACCESS) &&
-            (requestedMask & XDOWS_INJECTION_PROCESS_VM_WRITE_ACCESS)) {
-            dangerousMask |= XDOWS_INJECTION_PROCESS_SUSPEND_RESUME_ACCESS;
-        }
-        targetCreateTime = PsGetProcessCreateTimeQuadPart(targetProcess);
-    } else if (Info->ObjectType == *PsThreadType) {
-        PETHREAD targetThread = (PETHREAD)Info->Object;
-        targetProcessId = PsGetThreadProcessId(targetThread);
-        targetThreadId = PsGetThreadId(targetThread);
-        eventType = XdowsSecurityEventThreadHandle;
-        dangerousMask = XDOWS_INJECTION_THREAD_ACCESS_CORE;
-        // THREAD_SUSPEND_RESUME is suspicious only together with THREAD_SET_CONTEXT
-        if ((requestedMask & XDOWS_INJECTION_THREAD_SUSPEND_RESUME_ACCESS) &&
-            (requestedMask & XDOWS_INJECTION_THREAD_ACCESS_CORE)) {
-            dangerousMask |= XDOWS_INJECTION_THREAD_SUSPEND_RESUME_ACCESS;
-        }
-        targetCreateTime = PsGetProcessCreateTimeQuadPart(PsGetThreadProcess(targetThread));
-    } else {
+    if (!XdowsInjectionResolveTarget(Info, &target)) {
         return OB_PREOP_SUCCESS;
     }
 
-    effectiveDangerous = requestedMask & dangerousMask;
+    threatMask = XdowsInjectionComputeThreatMask(&target, requestedMask);
+    effectiveDangerous = requestedMask & threatMask;
 
-    if (targetProcessId == NULL ||
-        targetProcessId == PsGetCurrentProcessId() ||
+    //
+    // Fast exit: no target, self-targeted, or nothing dangerous. Lock-free.
+    //
+    callerProcessId = PsGetCurrentProcessId();
+    if (target.TargetProcessId == NULL ||
+        target.TargetProcessId == callerProcessId ||
         effectiveDangerous == 0) {
         return OB_PREOP_SUCCESS;
     }
 
-    sourcePid = HandleToULong(PsGetCurrentProcessId());
-    targetPid = HandleToULong(targetProcessId);
+    sourcePid = HandleToULong(callerProcessId);
 
-    // Cache hit: skip user-mode prompt for repeated requests
-    if (XdowsInjectionCacheLookup(sourcePid, targetPid, targetCreateTime, effectiveDangerous)) {
+    //
+    // Cache hit: skip user-mode consultation for repeated allow requests.
+    //
+    if (XdowsInjectionLookupVerdict(
+            sourcePid,
+            HandleToULong(target.TargetProcessId),
+            target.TargetCreateTime,
+            effectiveDangerous)) {
         return OB_PREOP_SUCCESS;
     }
 
-    if (XdowsInjectionAskUser(
-        eventType,
-        targetPid,
-        HandleToULong(targetThreadId),
-        effectiveDangerous,
-        &eventId,
-        &correlationId)) {
-        // User allowed: record in cache for subsequent repeated requests
-        XdowsInjectionCacheRecordAllow(sourcePid, targetPid, targetCreateTime, effectiveDangerous);
+    if (XdowsInjectionConsultUser(
+            &target,
+            effectiveDangerous,
+            sourcePid,
+            &eventId,
+            &correlationId)) {
+        XdowsInjectionRecordVerdict(
+            sourcePid,
+            HandleToULong(target.TargetProcessId),
+            target.TargetCreateTime,
+            effectiveDangerous);
         return OB_PREOP_SUCCESS;
     }
 
-    *desiredAccess &= ~dangerousMask;
+    *desiredAccess &= ~threatMask;
     XdowsLogWrite(
         XdowsSecurityLogWarning,
         eventId,
         correlationId,
         L"Injection",
-        L"Dangerous handle permissions stripped.");
+        L"Injection handle rights stripped.");
     return OB_PREOP_SUCCESS;
 }
 
@@ -386,12 +476,12 @@ XdowsInjectionProtectInitialize(
     UNICODE_STRING altitude;
     NTSTATUS status;
 
-    if (g_InjectionObRegistration != NULL) {
+    if (g_Injection.CallbackHandle != NULL) {
         return STATUS_SUCCESS;
     }
 
-    KeInitializeSpinLock(&g_InjectionCacheLock);
-    RtlZeroMemory(g_InjectionCache, sizeof(g_InjectionCache));
+    RtlZeroMemory(&g_Injection, sizeof(g_Injection));
+    ExInitializePushLock(&g_Injection.Lock);
 
     RtlZeroMemory(operations, sizeof(operations));
     operations[0].ObjectType = PsProcessType;
@@ -409,14 +499,16 @@ XdowsInjectionProtectInitialize(
     registration.Altitude = altitude;
     registration.OperationRegistration = operations;
 
-    status = ObRegisterCallbacks(&registration, &g_InjectionObRegistration);
+    status = ObRegisterCallbacks(&registration, &g_Injection.CallbackHandle);
     if (!NT_SUCCESS(status)) {
-        g_InjectionObRegistration = NULL;
-        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"Injection", L"OB callback registration failed", status);
+        g_Injection.CallbackHandle = NULL;
+        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"Injection",
+            L"Object callback registration failed", status);
         return status;
     }
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Injection", L"Injection callbacks registered.");
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Injection",
+        L"Injection protection callbacks registered.");
     return STATUS_SUCCESS;
 }
 
@@ -425,16 +517,21 @@ XdowsInjectionProtectShutdown(
     VOID
     )
 {
-    PVOID handle = g_InjectionObRegistration;
-    g_InjectionObRegistration = NULL;
+    PVOID handle;
+
+    handle = g_Injection.CallbackHandle;
+    g_Injection.CallbackHandle = NULL;
 
     if (handle != NULL) {
+        //
+        // ObUnRegisterCallbacks drains in-flight callbacks, so clearing the
+        // verdict cache afterward without the lock is safe.
+        //
         ObUnRegisterCallbacks(handle);
     }
 
-    // ObUnRegisterCallbacks synchronously waits for all in-flight callbacks,
-    // so clearing the cache here without the lock is safe.
-    RtlZeroMemory(g_InjectionCache, sizeof(g_InjectionCache));
+    RtlZeroMemory(g_Injection.Verdicts, sizeof(g_Injection.Verdicts));
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Injection", L"Injection callbacks unregistered.");
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Injection",
+        L"Injection protection callbacks unregistered.");
 }
