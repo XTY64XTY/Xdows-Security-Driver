@@ -11,8 +11,8 @@ Abstract:
     Registers a PsSetCreateProcessNotifyRoutineEx callback. For each new
     process, the callback assembles an XDOWS_SECURITY_EVENT describing the
     launch (image path, command line, parent/creator identities) and asks
-    user-mode policy for a verdict within a bounded wait. A Block or Timeout
-    verdict fails the launch by setting CreateInfo->CreationStatus to
+    user-mode policy for a verdict within a bounded wait. A Block verdict
+    fails the launch by setting CreateInfo->CreationStatus to
     STATUS_VIRUS_INFECTED, which surfaces to the caller as the Windows shell
     message "Operation did not complete successfully because the file contains
     a virus or potentially unwanted software."
@@ -150,9 +150,15 @@ XdowsProcessBuildLaunchEvent(
 }
 
 //
-// Apply the user-mode verdict to the create-notify info. Block/Timeout fail
-// the launch with STATUS_VIRUS_INFECTED; anything else lets the launch
-// proceed.
+// Apply the user-mode verdict to the create-notify info. Only an explicit
+// Block verdict fails the launch with STATUS_VIRUS_INFECTED; anything else
+// (Allow/Timeout/bridge-error) lets the launch proceed.
+//
+// IMPORTANT: Only an explicit Block verdict fails the launch.
+// XdowsSecurityDecisionTimeout is excluded: STATUS_TIMEOUT (0x00000102) is
+// NT_SUCCESS, so it is NOT a bridge-failure. A timeout means the user-mode
+// scanner was too busy to answer -- failing the launch would prevent any
+// program from starting when the scanner is congested. See spec R02.
 //
 static
 VOID
@@ -162,8 +168,7 @@ XdowsProcessApplyVerdict(
     _Inout_ PPS_CREATE_NOTIFY_INFO CreateInfo
     )
 {
-    if (Decision->Decision != XdowsSecurityDecisionBlock &&
-        Decision->Decision != XdowsSecurityDecisionTimeout) {
+    if (Decision->Decision != XdowsSecurityDecisionBlock) {
         return;
     }
 
@@ -172,9 +177,7 @@ XdowsProcessApplyVerdict(
         Event->EventId,
         Event->CorrelationId,
         L"Process",
-        Decision->Decision == XdowsSecurityDecisionTimeout
-            ? L"Process launch blocked after verdict timeout."
-            : L"Process launch blocked by user-mode verdict.");
+        L"Process launch blocked by user-mode verdict.");
 
     CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
 }

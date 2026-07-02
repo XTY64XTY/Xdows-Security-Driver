@@ -255,6 +255,15 @@ XdowsFileConsultPolicy(
 //
 // TRUE if the user-mode verdict should fail the originating operation.
 //
+// IMPORTANT: Only an explicit Block verdict fails the operation.
+// STATUS_TIMEOUT (0x00000102) is NT_SUCCESS, so the QueueStatus short-circuit
+// below does NOT fire for kernel wait timeouts. Instead we exclude
+// XdowsSecurityDecisionTimeout explicitly: a timeout means the user-mode
+// scanner was too busy to answer, which is NOT a confirmed virus verdict.
+// Failing every file open on scanner congestion would make the entire system
+// unusable (no .exe/.dll can be loaded). The spec's R02 "bridge failed -> Allow"
+// intent covers this case.
+//
 static
 BOOLEAN
 XdowsFileVerdictBlocks(
@@ -265,8 +274,7 @@ XdowsFileVerdictBlocks(
     if (!NT_SUCCESS(QueueStatus)) {
         return FALSE;
     }
-    return Decision->Decision == XdowsSecurityDecisionBlock ||
-           Decision->Decision == XdowsSecurityDecisionTimeout;
+    return Decision->Decision == XdowsSecurityDecisionBlock;
 }
 
 //
