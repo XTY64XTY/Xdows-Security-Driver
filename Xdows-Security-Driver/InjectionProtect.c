@@ -372,15 +372,27 @@ XdowsInjectionConsultUser(
     }
 
     status = XdowsQueueEventAndWait(&event, &decision);
-    if (!NT_SUCCESS(status)) {
+    if (!NT_SUCCESS(status) ||
+        decision.Decision == XdowsSecurityDecisionTimeout) {
+        //
+        // Bridge failure (client not connected, queue full, allocation
+        // failure) OR kernel wait timeout. Per spec R02, fail OPEN: allow
+        // the handle request rather than stripping permissions. Failing
+        // closed breaks every system service that opens cross-process
+        // handles during startup (before the client connects) or during
+        // scanner congestion, rendering the system unusable.
+        //
+        // NOTE: STATUS_TIMEOUT (0x00000102) is NT_SUCCESS, so the first
+        // check alone does not catch it; the Decision==Timeout check does.
+        //
         XdowsLogWriteStatus(
             XdowsSecurityLogWarning,
             event.EventId,
             event.CorrelationId,
             L"Injection",
-            L"User-mode consultation failed",
+            L"Bridge failed or timed out; handle allowed (fail-open per R02)",
             status);
-        return FALSE;
+        return TRUE;
     }
 
     return decision.Decision == XdowsSecurityDecisionAllow;
