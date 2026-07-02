@@ -126,7 +126,11 @@ XdowsFileIsSystemDirectory(
 {
     static const UNICODE_STRING Segments[] = {
         RTL_CONSTANT_STRING(L"\\Windows\\System32\\"),
-        RTL_CONSTANT_STRING(L"\\Windows\\SysWOW64\\")
+        RTL_CONSTANT_STRING(L"\\Windows\\SysWOW64\\"),
+        RTL_CONSTANT_STRING(L"\\Windows\\System\\"),
+        RTL_CONSTANT_STRING(L"\\Windows\\WinSxS\\"),
+        RTL_CONSTANT_STRING(L"\\Windows\\assembly\\"),
+        RTL_CONSTANT_STRING(L"\\Windows\\Microsoft.NET\\")
     };
     ULONG i;
     ULONG s;
@@ -245,7 +249,9 @@ XdowsFileConsultPolicy(
                  XdowsSecurityEventFlagFileOpenNameAvailable;
     event.ProcessId = OriginatorPid;
     event.CreatingProcessId = HandleToULong(PsGetCurrentProcessId());
-    event.KernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
+    event.KernelWaitTimeoutMs = (EventType == XdowsSecurityEventFileCreate)
+        ? XDOWS_FILE_CREATE_KERNEL_WAIT_TIMEOUT_MS
+        : XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
 
     XdowsFileCopyNameInto(event.ImagePath, XDOWS_SECURITY_MAX_PATH_CHARS, Path);
 
