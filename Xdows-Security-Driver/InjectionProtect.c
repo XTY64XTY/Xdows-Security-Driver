@@ -395,7 +395,13 @@ XdowsInjectionConsultUser(
         return TRUE;
     }
 
-    return decision.Decision == XdowsSecurityDecisionAllow;
+    //
+    // Treat anything that is not an explicit Block as allow. Per R02, the
+    // bridge is the source of truth; if the verdict is malformed (not
+    // Allow/Block/Timeout) we fail-open rather than stripping permissions,
+    // which would otherwise break legitimate handle requests.
+    //
+    return decision.Decision != XdowsSecurityDecisionBlock;
 }
 
 static
