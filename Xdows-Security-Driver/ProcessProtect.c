@@ -35,6 +35,8 @@ Environment:
 --*/
 
 #include "driver.h"
+#include "BehaviorRules.h"
+#include "RansomwareMonitor.h"
 #include <ntstrsafe.h>
 
 //
@@ -197,15 +199,55 @@ XdowsProcessNotifyRoutine(
     UNREFERENCED_PARAMETER(Process);
 
     //
-    // CreateInfo is NULL for process-exit notifications, which we do not
-    // gate on.
+    // CreateInfo is NULL for process-exit notifications. We do not gate on
+    // exit, but we must reclaim the ransomware monitor slot so the table
+    // does not fill up with dead PIDs. Without this, after 64 distinct
+    // document-writing processes the monitor would stop tracking new PIDs.
     //
     if (CreateInfo == NULL) {
+        XdowsRansomwareMonitorResetProcess(HandleToULong(ProcessId));
         return;
     }
 
     if (!XdowsProcessBuildLaunchEvent(ProcessId, CreateInfo, &event)) {
         return;
+    }
+
+    //
+    // In-kernel behavior fast-path: scan the command line for high-confidence
+    // malicious patterns (VSS deletion, encoded PowerShell, LOLBin abuse).
+    // A hit blocks the launch immediately without waiting for the user-mode
+    // model verdict. This is critical for ransomware precursors (e.g.
+    // "vssadmin delete shadows") which must be stopped before the command
+    // executes, and the user-mode scan round-trip can take up to 2s.
+    //
+    // PolicyBypass (-ExecutionPolicy Bypass) is detected and logged but NOT
+    // blocked in the fast-path: it is a common legitimate pattern in enterprise
+    // admin scripts, SCCM/Intune agents, and installers. It is left for the
+    // user-mode model to decide, which can correlate it with other signals.
+    //
+    {
+        UNICODE_STRING cmdLine;
+        XDOWS_BEHAVIOR_TYPE behavior;
+
+        RtlInitEmptyUnicodeString(&cmdLine, event.CommandLine,
+            XDOWS_SECURITY_MAX_COMMAND_CHARS * sizeof(WCHAR));
+        cmdLine.Length = (USHORT)(wcslen(event.CommandLine) * sizeof(WCHAR));
+
+        behavior = XdowsBehaviorInspectCommandLine(&cmdLine);
+        if (behavior != XdowsBehaviorNone) {
+            XdowsLogWrite(
+                XdowsSecurityLogWarning,
+                event.EventId,
+                event.CorrelationId,
+                L"Process",
+                XdowsBehaviorTypeName(behavior));
+
+            if (behavior != XdowsBehaviorPolicyBypass) {
+                CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
+                return;
+            }
+        }
     }
 
     status = XdowsQueueEventAndWait(&event, &decision);

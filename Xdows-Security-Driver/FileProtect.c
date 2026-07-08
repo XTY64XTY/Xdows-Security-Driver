@@ -34,6 +34,7 @@ Environment:
 
 #include <fltKernel.h>
 #include "driver.h"
+#include "RansomwareMonitor.h"
 #include <ntstrsafe.h>
 
 //
@@ -320,6 +321,45 @@ XdowsFileIsRenameClass(
 }
 
 //
+// TRUE if the PreCreate operation requests write access to the file. This
+// distinguishes opens that will modify the file from read-only opens, which
+// the ransomware rate monitor must not count -- a file manager thumbnailing
+// a folder can open dozens of document files read-only in a burst, and
+// counting those as writes would cause false positives.
+//
+// Both the create disposition (FILE_OVERWRITE / FILE_SUPERSEDE / etc.) and
+// the DesiredAccess mask (FILE_WRITE_DATA / FILE_APPEND_DATA) are checked:
+// some callers pass FILE_OPEN_IF with write access, others pass FILE_OVERWRITE
+// with no explicit access bits.
+//
+static
+BOOLEAN
+XdowsFileIsWriteOpen(
+    _In_ PFLT_CALLBACK_DATA Data
+    )
+{
+    ULONG disposition;
+    ACCESS_MASK desiredAccess;
+
+    disposition = (Data->Iopb->Parameters.Create.Options >> 24) & 0x000000FF;
+    desiredAccess = Data->Iopb->Parameters.Create.SecurityContext->DesiredAccess;
+
+    if (disposition == FILE_OVERWRITE ||
+        disposition == FILE_OVERWRITE_IF ||
+        disposition == FILE_SUPERSEDE ||
+        disposition == FILE_CREATE) {
+        return TRUE;
+    }
+
+    if (FlagOn(desiredAccess, FILE_WRITE_DATA) ||
+        FlagOn(desiredAccess, FILE_APPEND_DATA)) {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+//
 // Post-cleanup size gate: only report writes on regular files whose size is
 // within the scan ceiling.
 //
@@ -376,6 +416,53 @@ XdowsFilePreCreate(
     if (!XdowsFileIsScannablePath(&name->Name)) {
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    //
+    // Ransomware rate detection (sliding window).
+    //
+    // For write-opens: record the document-file write. RecordWrite returns
+    // TRUE when the per-process threshold is crossed within the window, or
+    // when the process is already flagged. This catches the encryption
+    // burst at open time -- before the file is actually encrypted -- so
+    // only the first handful of files in the burst are affected.
+    //
+    // For read-opens: do not increment the counter (a file manager
+    // thumbnailing a folder can open dozens of documents read-only), but
+    // still check IsFlagged so an already-flagged ransomware process is
+    // blocked from reading further files to encrypt.
+    //
+    {
+        ULONG originatorPid = HandleToULong(FltGetRequestorProcessIdEx(Data));
+        BOOLEAN ransomBlock = FALSE;
+
+        if (XdowsFileIsWriteOpen(Data)) {
+            ransomBlock = XdowsRansomwareMonitorRecordWrite(
+                originatorPid, &name->Name);
+        }
+        if (!ransomBlock) {
+            ransomBlock = XdowsRansomwareMonitorIsFlagged(originatorPid);
+        }
+
+        if (ransomBlock) {
+            ULONGLONG ransomEventId = XdowsAllocateEventId();
+            XdowsLogWrite(
+                XdowsSecurityLogWarning,
+                ransomEventId,
+                ransomEventId,
+                L"File",
+                L"Ransomware rate threshold exceeded; operation blocked.");
+            //
+            // Complete the IRP directly with STATUS_VIRUS_INFECTED rather
+            // than calling XdowsFileFailWithVirus, which would log a
+            // misleading "blocked by user-mode verdict" message -- this
+            // block originates from the in-kernel monitor.
+            //
+            Data->IoStatus.Status = STATUS_VIRUS_INFECTED;
+            Data->IoStatus.Information = 0;
+            FltReleaseFileNameInformation(name);
+            return FLT_PREOP_COMPLETE;
+        }
     }
 
     //
@@ -544,6 +631,13 @@ XdowsFileProtectInitialize(
     if (g_XdowsDriverContext.Device == NULL) {
         return STATUS_INVALID_DEVICE_STATE;
     }
+
+    //
+    // Initialize the ransomware rate monitor before the minifilter goes
+    // active. The monitor is zero-initialized statically but the spinlock
+    // must be set up explicitly.
+    //
+    XdowsRansomwareMonitorInitialize();
 
     deviceObject = WdfDeviceWdmGetDeviceObject(g_XdowsDriverContext.Device);
     if (deviceObject == NULL || deviceObject->DriverObject == NULL) {
