@@ -51,7 +51,7 @@ Environment:
 // Synchronous user-mode verdict timeout for process-launch decisions.
 // See module header for the rationale behind the shorter-than-default value.
 //
-#define XDOWS_PROCESS_LAUNCH_VERDICT_TIMEOUT_MS 2000u
+#define XDOWS_PROCESS_LAUNCH_VERDICT_TIMEOUT_MS 32000u
 
 typedef struct _XDOWS_PROCESS_CONTEXT {
     volatile BOOLEAN CallbackRegistered;
