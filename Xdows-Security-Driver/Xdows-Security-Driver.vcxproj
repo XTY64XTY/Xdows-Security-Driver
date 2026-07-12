@@ -107,6 +107,7 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
+    <SignMode>Off</SignMode>
     <XdowsDriverTestCertificateSubject>Xdows Security Driver Test Certificate</XdowsDriverTestCertificateSubject>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -187,7 +188,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="XdowsTestSignDriverPackage" AfterTargets="Inf2Cat" Condition="'$(XdowsSkipTestSigning)' != 'true'">
     <PropertyGroup>
-      <XdowsDriverPackageDirectory>$(MSBuildProjectDirectory)\$(Platform)\$(Configuration)\$(TargetName)</XdowsDriverPackageDirectory>
+      <XdowsDriverPackageDirectory>$(OutDir)$(TargetName)</XdowsDriverPackageDirectory>
       <XdowsSignToolPath Condition="'$(XdowsSignToolPath)' == '' and Exists('$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\signtool.exe')">$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\signtool.exe</XdowsSignToolPath>
       <XdowsSignToolPath Condition="'$(XdowsSignToolPath)' == '' and Exists('$(WindowsSdkDir)bin\$(WindowsTargetPlatformVersion)\x64\signtool.exe')">$(WindowsSdkDir)bin\$(WindowsTargetPlatformVersion)\x64\signtool.exe</XdowsSignToolPath>
       <XdowsSignToolPath Condition="'$(XdowsSignToolPath)' == '' and Exists('$(WDKContentRoot)bin\$(TargetPlatformVersion)\x64\signtool.exe')">$(WDKContentRoot)bin\$(TargetPlatformVersion)\x64\signtool.exe</XdowsSignToolPath>
