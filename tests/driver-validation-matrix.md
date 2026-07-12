@@ -60,10 +60,12 @@ Pass criteria:
 | Metric | Method | Target |
 | --- | --- | --- |
 | Concurrent process events | Launch 100 benign helper processes in parallel. | No dropped events except documented queue pressure; no app crash. |
-| File event burst | Create/write/rename 1,000 small files in a temp directory. | Driver remains responsive; average decision latency recorded. |
-| Decision latency | Log elapsed time from driver event ID to submitted decision. | Median and p95 captured in test notes. |
+| Read-only system workload | Repeatedly open 1,000 system DLLs without write access and compare protocol-v2 counters. | Zero `FileCreate` or `FileWrite` user-mode decisions. |
+| File event burst | Create/write/rename 1,000 small files in a temp directory. | At most one `FileWrite` decision per dirty handle; zero dropped events and non-induced timeouts. |
+| Decision latency | Log `ElapsedMs` and measure cached/trusted decisions separately from cold model scans. | Cached/trusted p95 below 50 ms; cold scan p95 no more than 1.25x standalone model benchmark; Pro below 1 second. |
 | Memory stability | Observe app and driver memory during 15 minute event burst. | No unbounded growth. |
 | Timeout ratio | Disconnect bridge during controlled test windows. | Timeout count equals induced disconnect cases. |
+| Idle overhead | Leave protection enabled for 15 minutes after caches warm. | Combined app/driver average CPU below 2%. |
 
 ## Evidence Template
 

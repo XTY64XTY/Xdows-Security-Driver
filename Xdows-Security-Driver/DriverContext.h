@@ -32,9 +32,13 @@ typedef struct _XDOWS_PENDING_EVENT {
 typedef struct _XDOWS_DRIVER_CONTEXT {
     WDFDEVICE Device;
     KSPIN_LOCK Lock;
+    KEVENT PendingAvailableEvent;
     LIST_ENTRY PendingEvents;
     ULONG PendingEventCount;
     ULONG DroppedEventCount;
+    ULONG ReceivedByType[XDOWS_SECURITY_EVENT_TYPE_COUNT];
+    ULONG DroppedByType[XDOWS_SECURITY_EVENT_TYPE_COUNT];
+    ULONG TimedOutByType[XDOWS_SECURITY_EVENT_TYPE_COUNT];
     ULONG64 NextEventId;
     //
     // Read lock-free by protection modules (e.g. InjectionProtect's trusted-

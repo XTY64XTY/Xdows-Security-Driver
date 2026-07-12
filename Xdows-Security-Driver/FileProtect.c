@@ -60,10 +60,55 @@ Environment:
 typedef struct _XDOWS_FILE_CONTEXT {
     PFLT_FILTER            FilterHandle;
     FLT_OPERATION_REGISTRATION Operations[4];
+    FLT_CONTEXT_REGISTRATION Contexts[2];
     FLT_REGISTRATION       Registration;
 } XDOWS_FILE_CONTEXT, *PXDOWS_FILE_CONTEXT;
 
+typedef struct _XDOWS_DIRTY_HANDLE_CONTEXT {
+    ULONG OriginatorPid;
+} XDOWS_DIRTY_HANDLE_CONTEXT, *PXDOWS_DIRTY_HANDLE_CONTEXT;
+
 static XDOWS_FILE_CONTEXT g_FileGuard;
+
+static
+FLT_POSTOP_CALLBACK_STATUS
+XdowsFilePostCreate(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _In_opt_ PVOID CompletionContext,
+    _In_ FLT_POST_OPERATION_FLAGS Flags
+    )
+{
+    PXDOWS_DIRTY_HANDLE_CONTEXT context = NULL;
+    NTSTATUS status;
+
+    UNREFERENCED_PARAMETER(CompletionContext);
+    UNREFERENCED_PARAMETER(Flags);
+
+    if (!NT_SUCCESS(Data->IoStatus.Status) || FltObjects->Instance == NULL || FltObjects->FileObject == NULL) {
+        return FLT_POSTOP_FINISHED_PROCESSING;
+    }
+
+    status = FltAllocateContext(
+        FltObjects->Filter,
+        FLT_STREAMHANDLE_CONTEXT,
+        sizeof(*context),
+        NonPagedPoolNx,
+        (PFLT_CONTEXT*)&context);
+    if (!NT_SUCCESS(status)) {
+        return FLT_POSTOP_FINISHED_PROCESSING;
+    }
+
+    context->OriginatorPid = HandleToULong(FltGetRequestorProcessIdEx(Data));
+    status = FltSetStreamHandleContext(
+        FltObjects->Instance,
+        FltObjects->FileObject,
+        FLT_SET_CONTEXT_KEEP_IF_EXISTS,
+        context,
+        NULL);
+    FltReleaseContext(context);
+    return FLT_POSTOP_FINISHED_PROCESSING;
+}
 
 //
 // Extension allowlist. Each entry is a fully-formed UNICODE_STRING whose
@@ -107,53 +152,6 @@ XdowsFileIsScannablePath(
         }
     }
 
-    return FALSE;
-}
-
-//
-// Fast-path trust check: files under \Windows\System32\ and \Windows\SysWOW64\
-// are trusted OS binaries that are re-opened constantly (system DLLs, drivers).
-// Scanning them on every FileCreate saturates user-mode scan capacity and
-// indirectly stalls InjectionProtect's user-mode consultation, which surfaces
-// as handle-strip timeouts and UI pop-up floods. The normalized name includes
-// a volume device prefix, so we search for the directory segment anywhere in
-// the path rather than matching a prefix.
-//
-static
-BOOLEAN
-XdowsFileIsSystemDirectory(
-    _In_ PCUNICODE_STRING Path
-    )
-{
-    static const UNICODE_STRING Segments[] = {
-        RTL_CONSTANT_STRING(L"\\Windows\\System32\\"),
-        RTL_CONSTANT_STRING(L"\\Windows\\SysWOW64\\"),
-        RTL_CONSTANT_STRING(L"\\Windows\\System\\"),
-        RTL_CONSTANT_STRING(L"\\Windows\\WinSxS\\"),
-        RTL_CONSTANT_STRING(L"\\Windows\\assembly\\"),
-        RTL_CONSTANT_STRING(L"\\Windows\\Microsoft.NET\\")
-    };
-    ULONG i;
-    ULONG s;
-
-    if (Path == NULL || Path->Buffer == NULL) {
-        return FALSE;
-    }
-
-    for (s = 0; s < RTL_NUMBER_OF(Segments); s++) {
-        if (Path->Length < Segments[s].Length) {
-            continue;
-        }
-        for (i = 0; i + Segments[s].Length <= Path->Length; i += sizeof(WCHAR)) {
-            UNICODE_STRING sub;
-            sub.Buffer = (PWCH)((PUCHAR)Path->Buffer + i);
-            sub.Length = Segments[s].Length;
-            sub.MaximumLength = Segments[s].Length;
-            if (RtlEqualUnicodeString(&sub, (PUNICODE_STRING)&Segments[s], TRUE)) {
-                return TRUE;
-            }
-        }
-    }
     return FALSE;
 }
 
@@ -397,8 +395,8 @@ XdowsFilePreCreate(
     )
 {
     PFLT_FILE_NAME_INFORMATION name = NULL;
-    XDOWS_SECURITY_DECISION verdict;
     NTSTATUS status;
+    BOOLEAN writeOpen;
 
     UNREFERENCED_PARAMETER(FltObjects);
     *CompletionContext = NULL;
@@ -465,31 +463,37 @@ XdowsFilePreCreate(
         }
     }
 
-    //
-    // Fast-path trust: skip scanning for files under trusted system
-    // directories. These are constantly re-opened OS binaries; scanning
-    // them floods user mode and indirectly stalls injection consultation.
-    // Only the FileCreate path is skipped -- writes and renames are still
-    // scanned because modifying system binaries is itself suspicious.
-    //
-    if (XdowsFileIsSystemDirectory(&name->Name)) {
-        FltReleaseFileNameInformation(name);
+    // Read-only opens are never sent to user mode. A write-capable handle is
+    // tagged in PostCreate and scanned exactly once when that handle closes.
+    writeOpen = XdowsFileIsWriteOpen(Data);
+    FltReleaseFileNameInformation(name);
+    return writeOpen ? FLT_PREOP_SUCCESS_WITH_CALLBACK : FLT_PREOP_SUCCESS_NO_CALLBACK;
+}
+
+static
+FLT_PREOP_CALLBACK_STATUS
+XdowsFilePreCleanup(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _Outptr_result_maybenull_ PVOID* CompletionContext
+    )
+{
+    PXDOWS_DIRTY_HANDLE_CONTEXT dirtyContext = NULL;
+    NTSTATUS status;
+
+    UNREFERENCED_PARAMETER(Data);
+    *CompletionContext = NULL;
+
+    status = FltGetStreamHandleContext(
+        FltObjects->Instance,
+        FltObjects->FileObject,
+        (PFLT_CONTEXT*)&dirtyContext);
+    if (!NT_SUCCESS(status) || dirtyContext == NULL) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    status = XdowsFileConsultPolicy(
-        XdowsSecurityEventFileCreate,
-        &name->Name,
-        HandleToULong(FltGetRequestorProcessIdEx(Data)),
-        &verdict);
-    FltReleaseFileNameInformation(name);
-
-    if (XdowsFileVerdictBlocks(status, &verdict)) {
-        XdowsFileFailWithVirus(Data, &verdict);
-        return FLT_PREOP_COMPLETE;
-    }
-
-    return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    FltReleaseContext(dirtyContext);
+    return FLT_PREOP_SUCCESS_WITH_CALLBACK;
 }
 
 static
@@ -503,6 +507,7 @@ XdowsFilePostCleanup(
 {
     PFLT_FILE_NAME_INFORMATION name = NULL;
     XDOWS_SECURITY_DECISION verdict;
+    PXDOWS_DIRTY_HANDLE_CONTEXT dirtyContext = NULL;
     NTSTATUS status;
 
     UNREFERENCED_PARAMETER(CompletionContext);
@@ -513,17 +518,33 @@ XdowsFilePostCleanup(
         return FLT_POSTOP_FINISHED_PROCESSING;
     }
 
+    status = FltGetStreamHandleContext(
+        FltObjects->Instance,
+        FltObjects->FileObject,
+        (PFLT_CONTEXT*)&dirtyContext);
+    if (!NT_SUCCESS(status) || dirtyContext == NULL) {
+        return FLT_POSTOP_FINISHED_PROCESSING;
+    }
+
+    (VOID)FltDeleteStreamHandleContext(
+        FltObjects->Instance,
+        FltObjects->FileObject,
+        NULL);
+
     if (!XdowsFilePassesSizeGate(FltObjects)) {
+        FltReleaseContext(dirtyContext);
         return FLT_POSTOP_FINISHED_PROCESSING;
     }
 
     status = XdowsFileAcquireName(Data, &name);
     if (!NT_SUCCESS(status)) {
+        FltReleaseContext(dirtyContext);
         return FLT_POSTOP_FINISHED_PROCESSING;
     }
 
     if (!XdowsFileIsScannablePath(&name->Name)) {
         FltReleaseFileNameInformation(name);
+        FltReleaseContext(dirtyContext);
         return FLT_POSTOP_FINISHED_PROCESSING;
     }
 
@@ -534,7 +555,7 @@ XdowsFilePostCleanup(
     status = XdowsFileConsultPolicy(
         XdowsSecurityEventFileWrite,
         &name->Name,
-        HandleToULong(FltGetRequestorProcessIdEx(Data)),
+        dirtyContext->OriginatorPid,
         &verdict);
 
     if (XdowsFileVerdictBlocks(status, &verdict)) {
@@ -547,6 +568,7 @@ XdowsFilePostCleanup(
     }
 
     FltReleaseFileNameInformation(name);
+    FltReleaseContext(dirtyContext);
     return FLT_POSTOP_FINISHED_PROCESSING;
 }
 
@@ -649,14 +671,23 @@ XdowsFileProtectInitialize(
 
     g_FileGuard.Operations[0].MajorFunction = IRP_MJ_CREATE;
     g_FileGuard.Operations[0].PreOperation  = XdowsFilePreCreate;
+    g_FileGuard.Operations[0].PostOperation = XdowsFilePostCreate;
     g_FileGuard.Operations[1].MajorFunction = IRP_MJ_CLEANUP;
+    g_FileGuard.Operations[1].PreOperation = XdowsFilePreCleanup;
     g_FileGuard.Operations[1].PostOperation = XdowsFilePostCleanup;
     g_FileGuard.Operations[2].MajorFunction = IRP_MJ_SET_INFORMATION;
     g_FileGuard.Operations[2].PreOperation  = XdowsFilePreSetInformation;
     g_FileGuard.Operations[3].MajorFunction = IRP_MJ_OPERATION_END;
 
+    g_FileGuard.Contexts[0].ContextType = FLT_STREAMHANDLE_CONTEXT;
+    g_FileGuard.Contexts[0].Flags = 0;
+    g_FileGuard.Contexts[0].Size = sizeof(XDOWS_DIRTY_HANDLE_CONTEXT);
+    g_FileGuard.Contexts[0].PoolTag = 'hDsX';
+    g_FileGuard.Contexts[1].ContextType = FLT_CONTEXT_END;
+
     g_FileGuard.Registration.Size = sizeof(FLT_REGISTRATION);
     g_FileGuard.Registration.Version = FLT_REGISTRATION_VERSION;
+    g_FileGuard.Registration.ContextRegistration = g_FileGuard.Contexts;
     g_FileGuard.Registration.OperationRegistration = g_FileGuard.Operations;
     g_FileGuard.Registration.FilterUnloadCallback = XdowsFileFilterUnload;
 
