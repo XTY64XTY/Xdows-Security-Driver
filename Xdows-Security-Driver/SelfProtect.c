@@ -99,7 +99,6 @@ typedef struct _XDOWS_GUARD_CONTEXT {
     volatile BOOLEAN Active;
     volatile BOOLEAN ExitPermitted;
     volatile HANDLE  GuardedProcessId;
-    volatile HANDLE  PrimaryThreadId;
     PVOID            CallbackHandle;
 } XDOWS_GUARD_CONTEXT, *PXDOWS_GUARD_CONTEXT;
 
@@ -255,7 +254,6 @@ XdowsSelfProtectInitialize(
     g_SelfGuard.Active = FALSE;
     g_SelfGuard.ExitPermitted = FALSE;
     g_SelfGuard.GuardedProcessId = NULL;
-    g_SelfGuard.PrimaryThreadId = NULL;
     g_SelfGuard.CallbackHandle = NULL;
 
     RtlZeroMemory(operations, sizeof(operations));
@@ -317,19 +315,20 @@ XdowsSelfProtectRegisterProcess(
     _In_ ULONG Flags
     )
 {
+    UNREFERENCED_PARAMETER(MainThreadId);
     UNREFERENCED_PARAMETER(Flags);
 
     //
     // Reject the idle/System (PID 4) pseudo-process and the invalid zero PID.
+    // MainThreadId is optional because thread handles are protected by resolving
+    // every target thread to its owning guarded process in the object callback.
     //
-    if (ProcessId == 0 || ProcessId == 4 ||
-        MainThreadId == 0) {
+    if (ProcessId == 0 || ProcessId == 4) {
         return STATUS_INVALID_PARAMETER;
     }
 
     ExAcquirePushLockExclusive(&g_SelfGuard.Lock);
     g_SelfGuard.GuardedProcessId = ULongToHandle(ProcessId);
-    g_SelfGuard.PrimaryThreadId = ULongToHandle(MainThreadId);
     g_SelfGuard.ExitPermitted = FALSE;
     g_SelfGuard.Active = TRUE;
     ExReleasePushLockExclusive(&g_SelfGuard.Lock);
@@ -376,7 +375,6 @@ XdowsSelfProtectClearRegistration(
     g_SelfGuard.Active = FALSE;
     g_SelfGuard.ExitPermitted = FALSE;
     g_SelfGuard.GuardedProcessId = NULL;
-    g_SelfGuard.PrimaryThreadId = NULL;
     ExReleasePushLockExclusive(&g_SelfGuard.Lock);
 
     XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
