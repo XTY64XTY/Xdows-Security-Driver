@@ -25,5 +25,7 @@ Assert-Match 'MajorFunction\s*=\s*IRP_MJ_WRITE' 'write callback registration'
 Assert-Match 'PreOperation\s*=\s*XdowsFilePreWrite' 'write pre-operation callback'
 Assert-Match 'XdowsFilePreWrite(?s:.*?)FltSetStreamHandleContext' 'write-time dirty marking'
 Assert-NotMatch 'PostOperation\s*=\s*XdowsFilePostCreate' 'write-open dirty approximation'
+Assert-Match 'XdowsFilePreSetInformation(?s:.*?)FltGetDestinationFileNameInformation' 'rename destination path resolution'
+Assert-Match '!XdowsFileIsScannablePath\(&name->Name\)\s*&&\s*!XdowsFileIsScannablePath\(&destinationName->Name\)' 'source and destination rename filtering'
 
 Write-Host "File protection source smoke passed."

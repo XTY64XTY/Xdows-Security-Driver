@@ -589,10 +589,12 @@ XdowsFilePreSetInformation(
     )
 {
     PFLT_FILE_NAME_INFORMATION name = NULL;
+    PFLT_FILE_NAME_INFORMATION destinationName = NULL;
+    PFILE_RENAME_INFORMATION renameInformation;
     XDOWS_SECURITY_DECISION verdict;
+    ULONG renameHeaderLength;
     NTSTATUS status;
 
-    UNREFERENCED_PARAMETER(FltObjects);
     *CompletionContext = NULL;
 
     if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
@@ -604,12 +606,57 @@ XdowsFilePreSetInformation(
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
+    renameHeaderLength = (ULONG)FIELD_OFFSET(FILE_RENAME_INFORMATION, FileName);
+    if (FltObjects->Instance == NULL ||
+        FltObjects->FileObject == NULL ||
+        Data->Iopb->Parameters.SetFileInformation.InfoBuffer == NULL ||
+        Data->Iopb->Parameters.SetFileInformation.Length < renameHeaderLength) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    renameInformation =
+        (PFILE_RENAME_INFORMATION)Data->Iopb->Parameters.SetFileInformation.InfoBuffer;
+    if (renameInformation->FileNameLength == 0 ||
+        renameInformation->FileNameLength >
+            Data->Iopb->Parameters.SetFileInformation.Length -
+                renameHeaderLength) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
     status = XdowsFileAcquireName(Data, &name);
     if (!NT_SUCCESS(status)) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    if (!XdowsFileIsScannablePath(&name->Name)) {
+    status = FltGetDestinationFileNameInformation(
+        FltObjects->Instance,
+        FltObjects->FileObject,
+        renameInformation->RootDirectory,
+        renameInformation->FileName,
+        renameInformation->FileNameLength,
+        FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT,
+        &destinationName);
+    if (NT_SUCCESS(status)) {
+        status = FltParseFileNameInformation(destinationName);
+    }
+    if (!NT_SUCCESS(status)) {
+        if (destinationName != NULL) {
+            FltReleaseFileNameInformation(destinationName);
+        }
+        FltReleaseFileNameInformation(name);
+        XdowsLogWriteStatus(
+            XdowsSecurityLogWarning,
+            0,
+            0,
+            L"File",
+            L"Rename destination path query failed; operation allowed",
+            status);
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    if (!XdowsFileIsScannablePath(&name->Name) &&
+        !XdowsFileIsScannablePath(&destinationName->Name)) {
+        FltReleaseFileNameInformation(destinationName);
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
@@ -619,6 +666,7 @@ XdowsFilePreSetInformation(
         &name->Name,
         HandleToULong(FltGetRequestorProcessIdEx(Data)),
         &verdict);
+    FltReleaseFileNameInformation(destinationName);
     FltReleaseFileNameInformation(name);
 
     if (XdowsFileVerdictBlocks(status, &verdict)) {
