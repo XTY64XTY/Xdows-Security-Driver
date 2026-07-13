@@ -27,5 +27,7 @@ Assert-Match 'XdowsFilePreWrite(?s:.*?)FltSetStreamHandleContext' 'write-time di
 Assert-NotMatch 'PostOperation\s*=\s*XdowsFilePostCreate' 'write-open dirty approximation'
 Assert-Match 'XdowsFilePreSetInformation(?s:.*?)FltGetDestinationFileNameInformation' 'rename destination path resolution'
 Assert-Match '!XdowsFileIsScannablePath\(&name->Name\)\s*&&\s*!XdowsFileIsScannablePath\(&destinationName->Name\)' 'source and destination rename filtering'
+Assert-Match 'XdowsFilePostCleanup(?s:.*?)FltDoCompletionProcessingWhenSafe(?s:.*?)XdowsFilePostCleanupWhenSafe' 'safe cleanup completion dispatch'
+Assert-Match 'XdowsFilePostCleanupWhenSafe(?s:.*?)if\s*\(!NT_SUCCESS\(Data->IoStatus\.Status\)\)' 'safe cleanup status gate'
 
 Write-Host "File protection source smoke passed."

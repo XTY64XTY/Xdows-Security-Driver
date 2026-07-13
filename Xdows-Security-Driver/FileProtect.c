@@ -506,7 +506,7 @@ XdowsFilePreCleanup(
 
 static
 FLT_POSTOP_CALLBACK_STATUS
-XdowsFilePostCleanup(
+XdowsFilePostCleanupWhenSafe(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
     _In_opt_ PVOID CompletionContext,
@@ -521,8 +521,7 @@ XdowsFilePostCleanup(
     UNREFERENCED_PARAMETER(CompletionContext);
     UNREFERENCED_PARAMETER(Flags);
 
-    if (KeGetCurrentIrql() != PASSIVE_LEVEL ||
-        !NT_SUCCESS(Data->IoStatus.Status)) {
+    if (!NT_SUCCESS(Data->IoStatus.Status)) {
         return FLT_POSTOP_FINISHED_PROCESSING;
     }
 
@@ -577,6 +576,40 @@ XdowsFilePostCleanup(
 
     FltReleaseFileNameInformation(name);
     FltReleaseContext(dirtyContext);
+    return FLT_POSTOP_FINISHED_PROCESSING;
+}
+
+static
+FLT_POSTOP_CALLBACK_STATUS
+XdowsFilePostCleanup(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _In_opt_ PVOID CompletionContext,
+    _In_ FLT_POST_OPERATION_FLAGS Flags
+    )
+{
+    FLT_POSTOP_CALLBACK_STATUS returnStatus;
+
+    if (FlagOn(Flags, FLTFL_POST_OPERATION_DRAINING)) {
+        return FLT_POSTOP_FINISHED_PROCESSING;
+    }
+
+    if (FltDoCompletionProcessingWhenSafe(
+            Data,
+            FltObjects,
+            CompletionContext,
+            Flags,
+            XdowsFilePostCleanupWhenSafe,
+            &returnStatus)) {
+        return returnStatus;
+    }
+
+    XdowsLogWrite(
+        XdowsSecurityLogWarning,
+        0,
+        0,
+        L"File",
+        L"Cleanup scan could not be scheduled safely; operation allowed.");
     return FLT_POSTOP_FINISHED_PROCESSING;
 }
 
