@@ -412,7 +412,7 @@ XdowsFilePreCreate(
     UNREFERENCED_PARAMETER(FltObjects);
     *CompletionContext = NULL;
 
-    if (KeGetCurrentIrql() != PASSIVE_LEVEL ||
+    if (KeGetCurrentIrql() > APC_LEVEL ||
         FlagOn(Data->Iopb->Parameters.Create.Options, FILE_DIRECTORY_FILE)) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
@@ -632,7 +632,7 @@ XdowsFilePreSetInformation(
 
     *CompletionContext = NULL;
 
-    if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+    if (KeGetCurrentIrql() > APC_LEVEL) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
