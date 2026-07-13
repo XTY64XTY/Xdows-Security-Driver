@@ -316,16 +316,18 @@ XdowsFileFailWithVirus(
 }
 
 //
-// TRUE if the SetInformation class is a rename we care about.
+// TRUE if SetInformation can expose existing content under a new name.
 //
 static
 BOOLEAN
-XdowsFileIsRenameClass(
+XdowsFileIsNameChangeClass(
     _In_ FILE_INFORMATION_CLASS InfoClass
     )
 {
     return InfoClass == FileRenameInformation ||
-           InfoClass == FileRenameInformationEx;
+           InfoClass == FileRenameInformationEx ||
+           InfoClass == FileLinkInformation ||
+           InfoClass == FileLinkInformationEx;
 }
 
 //
@@ -623,9 +625,9 @@ XdowsFilePreSetInformation(
 {
     PFLT_FILE_NAME_INFORMATION name = NULL;
     PFLT_FILE_NAME_INFORMATION destinationName = NULL;
-    PFILE_RENAME_INFORMATION renameInformation;
+    PFILE_RENAME_INFORMATION nameChangeInformation;
     XDOWS_SECURITY_DECISION verdict;
-    ULONG renameHeaderLength;
+    ULONG nameChangeHeaderLength;
     NTSTATUS status;
 
     *CompletionContext = NULL;
@@ -634,25 +636,27 @@ XdowsFilePreSetInformation(
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    if (!XdowsFileIsRenameClass(
+    if (!XdowsFileIsNameChangeClass(
             Data->Iopb->Parameters.SetFileInformation.FileInformationClass)) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    renameHeaderLength = (ULONG)FIELD_OFFSET(FILE_RENAME_INFORMATION, FileName);
+    // FILE_RENAME_INFORMATION and FILE_LINK_INFORMATION intentionally share
+    // the Flags/RootDirectory/FileNameLength/FileName layout.
+    nameChangeHeaderLength = (ULONG)FIELD_OFFSET(FILE_RENAME_INFORMATION, FileName);
     if (FltObjects->Instance == NULL ||
         FltObjects->FileObject == NULL ||
         Data->Iopb->Parameters.SetFileInformation.InfoBuffer == NULL ||
-        Data->Iopb->Parameters.SetFileInformation.Length < renameHeaderLength) {
+        Data->Iopb->Parameters.SetFileInformation.Length < nameChangeHeaderLength) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    renameInformation =
+    nameChangeInformation =
         (PFILE_RENAME_INFORMATION)Data->Iopb->Parameters.SetFileInformation.InfoBuffer;
-    if (renameInformation->FileNameLength == 0 ||
-        renameInformation->FileNameLength >
+    if (nameChangeInformation->FileNameLength == 0 ||
+        nameChangeInformation->FileNameLength >
             Data->Iopb->Parameters.SetFileInformation.Length -
-                renameHeaderLength) {
+                nameChangeHeaderLength) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
@@ -664,9 +668,9 @@ XdowsFilePreSetInformation(
     status = FltGetDestinationFileNameInformation(
         FltObjects->Instance,
         FltObjects->FileObject,
-        renameInformation->RootDirectory,
-        renameInformation->FileName,
-        renameInformation->FileNameLength,
+        nameChangeInformation->RootDirectory,
+        nameChangeInformation->FileName,
+        nameChangeInformation->FileNameLength,
         FLT_FILE_NAME_NORMALIZED | FLT_FILE_NAME_QUERY_DEFAULT,
         &destinationName);
     if (NT_SUCCESS(status)) {
@@ -682,7 +686,7 @@ XdowsFilePreSetInformation(
             0,
             0,
             L"File",
-            L"Rename destination path query failed; operation allowed",
+            L"Name-change destination path query failed; operation allowed",
             status);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
