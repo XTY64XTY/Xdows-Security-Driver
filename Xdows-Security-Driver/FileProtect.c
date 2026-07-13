@@ -60,6 +60,7 @@ Environment:
 //
 typedef struct _XDOWS_FILE_CONTEXT {
     PFLT_FILTER            FilterHandle;
+    volatile LONG          UnloadPermitted;
     FLT_OPERATION_REGISTRATION Operations[5];
     FLT_CONTEXT_REGISTRATION Contexts[2];
     FLT_REGISTRATION       Registration;
@@ -793,6 +794,16 @@ XdowsFileFilterUnload(
 {
     UNREFERENCED_PARAMETER(Flags);
 
+    if (InterlockedCompareExchange(&g_FileGuard.UnloadPermitted, 0, 0) == 0) {
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            0,
+            0,
+            L"SelfProtect",
+            L"Unauthorized minifilter unload request denied.");
+        return STATUS_FLT_DO_NOT_DETACH;
+    }
+
     if (g_FileGuard.FilterHandle != NULL) {
         PFLT_FILTER filter = g_FileGuard.FilterHandle;
         g_FileGuard.FilterHandle = NULL;
@@ -835,6 +846,7 @@ XdowsFileProtectInitialize(
     driverObject = deviceObject->DriverObject;
 
     RtlZeroMemory(&g_FileGuard, sizeof(g_FileGuard));
+    (VOID)InterlockedExchange(&g_FileGuard.UnloadPermitted, 0);
 
     g_FileGuard.Operations[0].MajorFunction = IRP_MJ_CREATE;
     g_FileGuard.Operations[0].PreOperation  = XdowsFilePreCreate;
@@ -891,6 +903,7 @@ XdowsFileProtectShutdown(
 {
     PFLT_FILTER filter;
 
+    (VOID)InterlockedExchange(&g_FileGuard.UnloadPermitted, 0);
     filter = g_FileGuard.FilterHandle;
     g_FileGuard.FilterHandle = NULL;
     g_XdowsDriverContext.FileProtectionEnabled = FALSE;
@@ -904,6 +917,28 @@ XdowsFileProtectShutdown(
         XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"File",
             L"File minifilter stopped.");
     }
+}
+
+VOID
+XdowsFileProtectAuthorizeUnload(
+    VOID
+    )
+{
+    (VOID)InterlockedExchange(&g_FileGuard.UnloadPermitted, 1);
+    XdowsLogWrite(
+        XdowsSecurityLogInfo,
+        0,
+        0,
+        L"SelfProtect",
+        L"Authorized minifilter unload enabled.");
+}
+
+VOID
+XdowsFileProtectRevokeUnload(
+    VOID
+    )
+{
+    (VOID)InterlockedExchange(&g_FileGuard.UnloadPermitted, 0);
 }
 
 //

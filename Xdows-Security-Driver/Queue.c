@@ -15,6 +15,7 @@ Environment:
 --*/
 
 #include "driver.h"
+#include "fileprotect.h"
 #include "selfprotect.h"
 #include "tokenauth.h"
 #include "queue.tmh"
@@ -191,6 +192,7 @@ Return Value:
 
         status = XdowsRegisterClient(input, requestorProcessId, output);
         if (NT_SUCCESS(status)) {
+            XdowsFileProtectRevokeUnload();
             information = sizeof(*output);
         }
         break;
@@ -379,6 +381,7 @@ Return Value:
         }
 
         XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Authorized shutdown accepted.");
+        XdowsFileProtectAuthorizeUnload();
         XdowsSelfProtectClearRegistration();
         XdowsTokenAuthInvalidate();
         XdowsDisconnectClient();
