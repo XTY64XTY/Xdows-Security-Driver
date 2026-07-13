@@ -131,6 +131,7 @@ XdowsRegisterClient(
     )
 {
     KIRQL oldIrql;
+    NTSTATUS tokenStatus;
 
     if (!XdowsIsHeaderValid(&Request->Header, sizeof(*Request))) {
         return STATUS_REVISION_MISMATCH;
@@ -159,9 +160,22 @@ XdowsRegisterClient(
         XDOWS_SECURITY_CAP_DIRTY_WRITE_COALESCING |
         XDOWS_SECURITY_CAP_BUILD_ID;
     Response->DriverBuildId = XDOWS_SECURITY_DRIVER_BUILD_ID;
-    (VOID)XdowsTokenAuthCopyOneTimeToken(
+    tokenStatus = XdowsTokenAuthCopyOneTimeToken(
         Response->ShutdownToken,
         RTL_NUMBER_OF(Response->ShutdownToken));
+    if (tokenStatus == STATUS_NOT_FOUND) {
+        tokenStatus = XdowsTokenAuthRotate();
+        if (NT_SUCCESS(tokenStatus)) {
+            tokenStatus = XdowsTokenAuthCopyOneTimeToken(
+                Response->ShutdownToken,
+                RTL_NUMBER_OF(Response->ShutdownToken));
+        }
+    }
+    if (!NT_SUCCESS(tokenStatus)) {
+        Response->Status = tokenStatus;
+        XdowsDisconnectClient();
+        return tokenStatus;
+    }
 
     XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client registered.");
     return STATUS_SUCCESS;

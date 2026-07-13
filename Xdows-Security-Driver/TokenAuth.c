@@ -290,3 +290,12 @@ XdowsTokenAuthInvalidate(
 
     XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Shutdown token cleared.");
 }
+
+NTSTATUS
+XdowsTokenAuthRotate(
+    VOID
+    )
+{
+    XdowsTokenAuthInvalidate();
+    return XdowsTokenAuthInitialize();
+}
