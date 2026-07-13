@@ -24,4 +24,9 @@ XdowsModulesShutdown(
     VOID
     );
 
+ULONG
+XdowsModulesGetActiveMask(
+    VOID
+    );
+
 EXTERN_C_END

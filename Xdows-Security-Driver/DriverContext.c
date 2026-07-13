@@ -11,6 +11,7 @@ Abstract:
 --*/
 
 #include "driver.h"
+#include "moduleregistry.h"
 #include "tokenauth.h"
 #include <ntstrsafe.h>
 
@@ -421,6 +422,7 @@ XdowsGetState(
     State->DroppedEventCount = g_XdowsDriverContext.DroppedEventCount;
     State->ProcessProtectionEnabled = g_XdowsDriverContext.ProcessProtectionEnabled ? 1 : 0;
     State->FileProtectionEnabled = g_XdowsDriverContext.FileProtectionEnabled ? 1 : 0;
+    State->ActiveModules = XdowsModulesGetActiveMask();
     State->ProtocolVersion = XDOWS_SECURITY_PROTOCOL_VERSION;
     State->Capabilities = XDOWS_SECURITY_CAP_PRIORITY_QUEUE |
         XDOWS_SECURITY_CAP_DIRTY_WRITE_COALESCING |

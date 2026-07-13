@@ -28,8 +28,31 @@ typedef enum _XDOWS_MODULE_INDEX {
 } XDOWS_MODULE_INDEX;
 
 static BOOLEAN g_ModuleStarted[XdowsModuleCount];
+static volatile LONG g_ActiveModuleMask;
 
 typedef NTSTATUS (*XDOWS_MODULE_INITIALIZER)(VOID);
+
+static
+ULONG
+XdowsModuleBit(
+    _In_ XDOWS_MODULE_INDEX Index
+    )
+{
+    switch (Index) {
+    case XdowsModuleTokenAuth:
+        return XDOWS_SECURITY_MODULE_TOKEN_AUTH;
+    case XdowsModuleProcess:
+        return XDOWS_SECURITY_MODULE_PROCESS;
+    case XdowsModuleFile:
+        return XDOWS_SECURITY_MODULE_FILE;
+    case XdowsModuleInjection:
+        return XDOWS_SECURITY_MODULE_INJECTION;
+    case XdowsModuleSelf:
+        return XDOWS_SECURITY_MODULE_SELF_PROTECT;
+    default:
+        return 0;
+    }
+}
 
 static
 VOID
@@ -37,7 +60,28 @@ XdowsMarkStarted(
     _In_ XDOWS_MODULE_INDEX Index
     )
 {
+    ULONG bit;
+
     g_ModuleStarted[Index] = TRUE;
+    bit = XdowsModuleBit(Index);
+    if (bit != 0) {
+        (VOID)InterlockedOr(&g_ActiveModuleMask, (LONG)bit);
+    }
+}
+
+static
+VOID
+XdowsMarkStopped(
+    _In_ XDOWS_MODULE_INDEX Index
+    )
+{
+    ULONG bit;
+
+    g_ModuleStarted[Index] = FALSE;
+    bit = XdowsModuleBit(Index);
+    if (bit != 0) {
+        (VOID)InterlockedAnd(&g_ActiveModuleMask, ~(LONG)bit);
+    }
 }
 
 static
@@ -73,6 +117,7 @@ XdowsModulesInitialize(
     NTSTATUS status;
 
     RtlZeroMemory(g_ModuleStarted, sizeof(g_ModuleStarted));
+    (VOID)InterlockedExchange(&g_ActiveModuleMask, 0);
 
     status = XdowsLogInitialize();
     if (!NT_SUCCESS(status)) {
@@ -100,31 +145,39 @@ XdowsModulesShutdown(
 {
     if (g_ModuleStarted[XdowsModuleSelf]) {
         XdowsSelfProtectShutdown();
-        g_ModuleStarted[XdowsModuleSelf] = FALSE;
+        XdowsMarkStopped(XdowsModuleSelf);
     }
 
     if (g_ModuleStarted[XdowsModuleInjection]) {
         XdowsInjectionProtectShutdown();
-        g_ModuleStarted[XdowsModuleInjection] = FALSE;
+        XdowsMarkStopped(XdowsModuleInjection);
     }
 
     if (g_ModuleStarted[XdowsModuleFile]) {
         XdowsFileProtectShutdown();
-        g_ModuleStarted[XdowsModuleFile] = FALSE;
+        XdowsMarkStopped(XdowsModuleFile);
     }
 
     if (g_ModuleStarted[XdowsModuleProcess]) {
         XdowsProcessProtectShutdown();
-        g_ModuleStarted[XdowsModuleProcess] = FALSE;
+        XdowsMarkStopped(XdowsModuleProcess);
     }
 
     if (g_ModuleStarted[XdowsModuleTokenAuth]) {
         XdowsTokenAuthShutdown();
-        g_ModuleStarted[XdowsModuleTokenAuth] = FALSE;
+        XdowsMarkStopped(XdowsModuleTokenAuth);
     }
 
     if (g_ModuleStarted[XdowsModuleLog]) {
         XdowsLogShutdown();
         g_ModuleStarted[XdowsModuleLog] = FALSE;
     }
+}
+
+ULONG
+XdowsModulesGetActiveMask(
+    VOID
+    )
+{
+    return (ULONG)InterlockedCompareExchange(&g_ActiveModuleMask, 0, 0);
 }
