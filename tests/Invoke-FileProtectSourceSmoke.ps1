@@ -29,5 +29,7 @@ Assert-Match 'XdowsFilePreSetInformation(?s:.*?)FltGetDestinationFileNameInforma
 Assert-Match '!XdowsFileIsScannablePath\(&name->Name\)\s*&&\s*!XdowsFileIsScannablePath\(&destinationName->Name\)' 'source and destination rename filtering'
 Assert-Match 'XdowsFilePostCleanup(?s:.*?)FltDoCompletionProcessingWhenSafe(?s:.*?)XdowsFilePostCleanupWhenSafe' 'safe cleanup completion dispatch'
 Assert-Match 'XdowsFilePostCleanupWhenSafe(?s:.*?)if\s*\(!NT_SUCCESS\(Data->IoStatus\.Status\)\)' 'safe cleanup status gate'
+Assert-Match 'FltStartFiltering(?s:.*?)FileProtectionEnabled\s*=\s*TRUE' 'active file-module state publication'
+Assert-Match 'XdowsFileProtectShutdown(?s:.*?)FileProtectionEnabled\s*=\s*FALSE' 'file-module shutdown state clearing'
 
 Write-Host "File protection source smoke passed."

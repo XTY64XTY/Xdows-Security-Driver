@@ -50,6 +50,7 @@ typedef struct _XDOWS_DRIVER_CONTEXT {
     BOOLEAN ClientConnected;
     BOOLEAN Initialized;
     BOOLEAN ProcessProtectionEnabled;
+    BOOLEAN FileProtectionEnabled;
 } XDOWS_DRIVER_CONTEXT, *PXDOWS_DRIVER_CONTEXT;
 
 extern XDOWS_DRIVER_CONTEXT g_XdowsDriverContext;

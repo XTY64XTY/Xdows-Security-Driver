@@ -721,6 +721,7 @@ XdowsFileFilterUnload(
     if (g_FileGuard.FilterHandle != NULL) {
         PFLT_FILTER filter = g_FileGuard.FilterHandle;
         g_FileGuard.FilterHandle = NULL;
+        g_XdowsDriverContext.FileProtectionEnabled = FALSE;
         FltUnregisterFilter(filter);
     }
     return STATUS_SUCCESS;
@@ -735,7 +736,9 @@ XdowsFileProtectInitialize(
     PDRIVER_OBJECT driverObject;
     NTSTATUS status;
 
+    g_XdowsDriverContext.FileProtectionEnabled = FALSE;
     if (g_FileGuard.FilterHandle != NULL) {
+        g_XdowsDriverContext.FileProtectionEnabled = TRUE;
         return STATUS_SUCCESS;
     }
 
@@ -800,6 +803,7 @@ XdowsFileProtectInitialize(
         return status;
     }
 
+    g_XdowsDriverContext.FileProtectionEnabled = TRUE;
     XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"File",
         L"File minifilter active.");
     return STATUS_SUCCESS;
@@ -814,6 +818,7 @@ XdowsFileProtectShutdown(
 
     filter = g_FileGuard.FilterHandle;
     g_FileGuard.FilterHandle = NULL;
+    g_XdowsDriverContext.FileProtectionEnabled = FALSE;
 
     if (filter != NULL) {
         //
