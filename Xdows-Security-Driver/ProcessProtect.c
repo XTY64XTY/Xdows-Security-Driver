@@ -37,6 +37,7 @@ Environment:
 #include "driver.h"
 #include "BehaviorRules.h"
 #include "RansomwareMonitor.h"
+#include "selfprotect.h"
 #include <ntstrsafe.h>
 
 //
@@ -206,6 +207,10 @@ XdowsProcessNotifyRoutine(
     //
     if (CreateInfo == NULL) {
         XdowsRansomwareMonitorResetProcess(HandleToULong(ProcessId));
+        if (XdowsIsRegisteredClientProcess(HandleToULong(ProcessId))) {
+            XdowsSelfProtectClearRegistration();
+            XdowsDisconnectClient();
+        }
         return;
     }
 

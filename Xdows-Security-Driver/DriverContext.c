@@ -207,11 +207,38 @@ XdowsDisconnectClient(
     )
 {
     KIRQL oldIrql;
+    LIST_ENTRY localList;
+
+    InitializeListHead(&localList);
 
     KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
     g_XdowsDriverContext.ClientConnected = FALSE;
     g_XdowsDriverContext.ClientProcessId = NULL;
+
+    while (!IsListEmpty(&g_XdowsDriverContext.PendingEvents)) {
+        PLIST_ENTRY entry = RemoveHeadList(&g_XdowsDriverContext.PendingEvents);
+        PXDOWS_PENDING_EVENT pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
+        pending->Linked = FALSE;
+        InsertTailList(&localList, entry);
+    }
+    g_XdowsDriverContext.PendingEventCount = 0;
     KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    KeSetEvent(&g_XdowsDriverContext.PendingAvailableEvent, IO_NO_INCREMENT, FALSE);
+
+    while (!IsListEmpty(&localList)) {
+        PLIST_ENTRY entry = RemoveHeadList(&localList);
+        PXDOWS_PENDING_EVENT pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
+        pending->Decision.Header.Size = sizeof(XDOWS_SECURITY_DECISION);
+        pending->Decision.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
+        pending->Decision.EventId = pending->Event.EventId;
+        pending->Decision.Decision = XdowsSecurityDecisionTimeout;
+        pending->Decision.ResultCode = (ULONG)STATUS_DEVICE_NOT_CONNECTED;
+        (VOID)RtlStringCchCopyW(
+            pending->Decision.Reason,
+            RTL_NUMBER_OF(pending->Decision.Reason),
+            L"client-disconnected");
+        KeSetEvent(&pending->DecisionEvent, IO_NO_INCREMENT, FALSE);
+    }
 
     XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client state cleared.");
 }
