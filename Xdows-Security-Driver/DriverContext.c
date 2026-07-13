@@ -126,6 +126,7 @@ XdowsAllocateEventId(
 NTSTATUS
 XdowsRegisterClient(
     _In_ PXDOWS_SECURITY_REGISTER_REQUEST Request,
+    _In_ ULONG RequestorProcessId,
     _Out_ PXDOWS_SECURITY_REGISTER_RESPONSE Response
     )
 {
@@ -134,6 +135,20 @@ XdowsRegisterClient(
     if (!XdowsIsHeaderValid(&Request->Header, sizeof(*Request))) {
         return STATUS_REVISION_MISMATCH;
     }
+    if (RequestorProcessId == 0 ||
+        Request->ClientProcessId != RequestorProcessId) {
+        return STATUS_ACCESS_DENIED;
+    }
+
+    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
+    if (g_XdowsDriverContext.ClientConnected &&
+        g_XdowsDriverContext.ClientProcessId != ULongToHandle(RequestorProcessId)) {
+        KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+        return STATUS_DEVICE_BUSY;
+    }
+    g_XdowsDriverContext.ClientConnected = TRUE;
+    g_XdowsDriverContext.ClientProcessId = ULongToHandle(RequestorProcessId);
+    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
 
     RtlZeroMemory(Response, sizeof(*Response));
     XdowsInitializeHeader(&Response->Header, sizeof(*Response));
@@ -148,13 +163,28 @@ XdowsRegisterClient(
         Response->ShutdownToken,
         RTL_NUMBER_OF(Response->ShutdownToken));
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
-    g_XdowsDriverContext.ClientConnected = TRUE;
-    g_XdowsDriverContext.ClientProcessId = ULongToHandle(Request->ClientProcessId);
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
-
     XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client registered.");
     return STATUS_SUCCESS;
+}
+
+BOOLEAN
+XdowsIsRegisteredClientProcess(
+    _In_ ULONG ProcessId
+    )
+{
+    KIRQL oldIrql;
+    BOOLEAN registered;
+
+    if (ProcessId == 0) {
+        return FALSE;
+    }
+
+    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
+    registered = g_XdowsDriverContext.Initialized &&
+        g_XdowsDriverContext.ClientConnected &&
+        g_XdowsDriverContext.ClientProcessId == ULongToHandle(ProcessId);
+    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    return registered;
 }
 
 VOID

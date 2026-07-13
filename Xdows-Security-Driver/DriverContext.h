@@ -68,7 +68,13 @@ XdowsShutdownGlobalContext(
 NTSTATUS
 XdowsRegisterClient(
     _In_ PXDOWS_SECURITY_REGISTER_REQUEST Request,
+    _In_ ULONG RequestorProcessId,
     _Out_ PXDOWS_SECURITY_REGISTER_RESPONSE Response
+    );
+
+BOOLEAN
+XdowsIsRegisteredClientProcess(
+    _In_ ULONG ProcessId
     );
 
 VOID

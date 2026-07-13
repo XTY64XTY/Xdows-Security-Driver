@@ -83,6 +83,45 @@ Return Value:
     return status;
 }
 
+static
+ULONG
+XdowsGetRequestorProcessId(
+    _In_ WDFREQUEST Request
+    )
+{
+    PIRP irp;
+    PETHREAD requestorThread;
+
+    irp = WdfRequestWdmGetIrp(Request);
+    if (irp == NULL) {
+        return 0;
+    }
+
+    requestorThread = irp->Tail.Overlay.Thread;
+    return requestorThread != NULL
+        ? HandleToULong(PsGetThreadProcessId(requestorThread))
+        : 0;
+}
+
+static
+NTSTATUS
+XdowsRequireRegisteredClient(
+    _In_ WDFREQUEST Request,
+    _Out_opt_ PULONG RequestorProcessId
+    )
+{
+    ULONG processId;
+
+    processId = XdowsGetRequestorProcessId(Request);
+    if (RequestorProcessId != NULL) {
+        *RequestorProcessId = processId;
+    }
+
+    return XdowsIsRegisteredClientProcess(processId)
+        ? STATUS_SUCCESS
+        : STATUS_ACCESS_DENIED;
+}
+
 VOID
 XdowsSecurityDriverEvtIoDeviceControl(
     _In_ WDFQUEUE Queue,
@@ -131,6 +170,7 @@ Return Value:
     {
         PXDOWS_SECURITY_REGISTER_REQUEST input;
         PXDOWS_SECURITY_REGISTER_RESPONSE output;
+        ULONG requestorProcessId;
 
         status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
         if (!NT_SUCCESS(status)) {
@@ -142,7 +182,14 @@ Return Value:
             break;
         }
 
-        status = XdowsRegisterClient(input, output);
+        requestorProcessId = XdowsGetRequestorProcessId(Request);
+        if (requestorProcessId == 0 ||
+            input->ClientProcessId != requestorProcessId) {
+            status = STATUS_ACCESS_DENIED;
+            break;
+        }
+
+        status = XdowsRegisterClient(input, requestorProcessId, output);
         if (NT_SUCCESS(status)) {
             information = sizeof(*output);
         }
@@ -151,6 +198,11 @@ Return Value:
     case IOCTL_XDOWS_SECURITY_HEARTBEAT:
     {
         PXDOWS_SECURITY_HEARTBEAT_REQUEST input;
+
+        status = XdowsRequireRegisteredClient(Request, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
 
         status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
         if (!NT_SUCCESS(status)) {
@@ -166,6 +218,11 @@ Return Value:
 
         UNREFERENCED_PARAMETER(InputBufferLength);
 
+        status = XdowsRequireRegisteredClient(Request, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
         status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*output), (PVOID*)&output, NULL);
         if (!NT_SUCCESS(status)) {
             break;
@@ -180,6 +237,11 @@ Return Value:
     case IOCTL_XDOWS_SECURITY_SUBMIT_DECISION:
     {
         PXDOWS_SECURITY_DECISION input;
+
+        status = XdowsRequireRegisteredClient(Request, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
 
         status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
         if (!NT_SUCCESS(status)) {
@@ -209,6 +271,11 @@ Return Value:
     {
         PXDOWS_SECURITY_LOG_ENTRY output;
 
+        status = XdowsRequireRegisteredClient(Request, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
         status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*output), (PVOID*)&output, NULL);
         if (!NT_SUCCESS(status)) {
             break;
@@ -221,6 +288,10 @@ Return Value:
         break;
     }
     case IOCTL_XDOWS_SECURITY_DISCONNECT_CLIENT:
+        status = XdowsRequireRegisteredClient(Request, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
         XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client disconnected.");
         XdowsDisconnectClient();
         status = STATUS_SUCCESS;
@@ -228,6 +299,12 @@ Return Value:
     case IOCTL_XDOWS_SECURITY_REGISTER_PROTECTED_PROCESS:
     {
         PXDOWS_SECURITY_PROTECTED_PROCESS_REQUEST input;
+        ULONG requestorProcessId;
+
+        status = XdowsRequireRegisteredClient(Request, &requestorProcessId);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
 
         status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
         if (!NT_SUCCESS(status)) {
@@ -237,6 +314,10 @@ Return Value:
         if (input->Header.Size != sizeof(*input) ||
             input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION) {
             status = STATUS_REVISION_MISMATCH;
+            break;
+        }
+        if (input->ProcessId != requestorProcessId) {
+            status = STATUS_ACCESS_DENIED;
             break;
         }
 
@@ -246,6 +327,12 @@ Return Value:
     case IOCTL_XDOWS_SECURITY_SET_VOLUNTARY_EXIT:
     {
         PXDOWS_SECURITY_VOLUNTARY_EXIT_REQUEST input;
+        ULONG requestorProcessId;
+
+        status = XdowsRequireRegisteredClient(Request, &requestorProcessId);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
 
         status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
         if (!NT_SUCCESS(status)) {
@@ -257,6 +344,10 @@ Return Value:
             status = STATUS_REVISION_MISMATCH;
             break;
         }
+        if (input->ProcessId != requestorProcessId) {
+            status = STATUS_ACCESS_DENIED;
+            break;
+        }
 
         status = XdowsSelfProtectSetVoluntaryExit(input->ProcessId, input->IsVoluntaryExit != 0);
         break;
@@ -264,6 +355,11 @@ Return Value:
     case IOCTL_XDOWS_SECURITY_AUTHORIZED_SHUTDOWN:
     {
         PXDOWS_SECURITY_SHUTDOWN_REQUEST input;
+
+        status = XdowsRequireRegisteredClient(Request, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
 
         status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
         if (!NT_SUCCESS(status)) {
