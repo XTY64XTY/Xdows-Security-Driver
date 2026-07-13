@@ -59,7 +59,7 @@ Environment:
 //
 typedef struct _XDOWS_FILE_CONTEXT {
     PFLT_FILTER            FilterHandle;
-    FLT_OPERATION_REGISTRATION Operations[4];
+    FLT_OPERATION_REGISTRATION Operations[5];
     FLT_CONTEXT_REGISTRATION Contexts[2];
     FLT_REGISTRATION       Registration;
 } XDOWS_FILE_CONTEXT, *PXDOWS_FILE_CONTEXT;
@@ -71,22 +71,32 @@ typedef struct _XDOWS_DIRTY_HANDLE_CONTEXT {
 static XDOWS_FILE_CONTEXT g_FileGuard;
 
 static
-FLT_POSTOP_CALLBACK_STATUS
-XdowsFilePostCreate(
+FLT_PREOP_CALLBACK_STATUS
+XdowsFilePreWrite(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
-    _In_opt_ PVOID CompletionContext,
-    _In_ FLT_POST_OPERATION_FLAGS Flags
+    _Outptr_result_maybenull_ PVOID* CompletionContext
     )
 {
     PXDOWS_DIRTY_HANDLE_CONTEXT context = NULL;
+    PXDOWS_DIRTY_HANDLE_CONTEXT existingContext = NULL;
     NTSTATUS status;
 
-    UNREFERENCED_PARAMETER(CompletionContext);
-    UNREFERENCED_PARAMETER(Flags);
+    *CompletionContext = NULL;
 
-    if (!NT_SUCCESS(Data->IoStatus.Status) || FltObjects->Instance == NULL || FltObjects->FileObject == NULL) {
-        return FLT_POSTOP_FINISHED_PROCESSING;
+    if (Data->Iopb->Parameters.Write.Length == 0 ||
+        FltObjects->Instance == NULL ||
+        FltObjects->FileObject == NULL) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    status = FltGetStreamHandleContext(
+        FltObjects->Instance,
+        FltObjects->FileObject,
+        (PFLT_CONTEXT*)&existingContext);
+    if (NT_SUCCESS(status) && existingContext != NULL) {
+        FltReleaseContext(existingContext);
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
     status = FltAllocateContext(
@@ -96,7 +106,7 @@ XdowsFilePostCreate(
         NonPagedPoolNx,
         (PFLT_CONTEXT*)&context);
     if (!NT_SUCCESS(status)) {
-        return FLT_POSTOP_FINISHED_PROCESSING;
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
     context->OriginatorPid = HandleToULong(FltGetRequestorProcessIdEx(Data));
@@ -107,7 +117,7 @@ XdowsFilePostCreate(
         context,
         NULL);
     FltReleaseContext(context);
-    return FLT_POSTOP_FINISHED_PROCESSING;
+    return FLT_PREOP_SUCCESS_NO_CALLBACK;
 }
 
 //
@@ -396,7 +406,6 @@ XdowsFilePreCreate(
 {
     PFLT_FILE_NAME_INFORMATION name = NULL;
     NTSTATUS status;
-    BOOLEAN writeOpen;
 
     UNREFERENCED_PARAMETER(FltObjects);
     *CompletionContext = NULL;
@@ -463,11 +472,10 @@ XdowsFilePreCreate(
         }
     }
 
-    // Read-only opens are never sent to user mode. A write-capable handle is
-    // tagged in PostCreate and scanned exactly once when that handle closes.
-    writeOpen = XdowsFileIsWriteOpen(Data);
+    // Opens are never sent to user mode. IRP_MJ_WRITE marks the stream-handle
+    // dirty only when a real write reaches the minifilter.
     FltReleaseFileNameInformation(name);
-    return writeOpen ? FLT_PREOP_SUCCESS_WITH_CALLBACK : FLT_PREOP_SUCCESS_NO_CALLBACK;
+    return FLT_PREOP_SUCCESS_NO_CALLBACK;
 }
 
 static
@@ -671,13 +679,14 @@ XdowsFileProtectInitialize(
 
     g_FileGuard.Operations[0].MajorFunction = IRP_MJ_CREATE;
     g_FileGuard.Operations[0].PreOperation  = XdowsFilePreCreate;
-    g_FileGuard.Operations[0].PostOperation = XdowsFilePostCreate;
-    g_FileGuard.Operations[1].MajorFunction = IRP_MJ_CLEANUP;
-    g_FileGuard.Operations[1].PreOperation = XdowsFilePreCleanup;
-    g_FileGuard.Operations[1].PostOperation = XdowsFilePostCleanup;
-    g_FileGuard.Operations[2].MajorFunction = IRP_MJ_SET_INFORMATION;
-    g_FileGuard.Operations[2].PreOperation  = XdowsFilePreSetInformation;
-    g_FileGuard.Operations[3].MajorFunction = IRP_MJ_OPERATION_END;
+    g_FileGuard.Operations[1].MajorFunction = IRP_MJ_WRITE;
+    g_FileGuard.Operations[1].PreOperation = XdowsFilePreWrite;
+    g_FileGuard.Operations[2].MajorFunction = IRP_MJ_CLEANUP;
+    g_FileGuard.Operations[2].PreOperation = XdowsFilePreCleanup;
+    g_FileGuard.Operations[2].PostOperation = XdowsFilePostCleanup;
+    g_FileGuard.Operations[3].MajorFunction = IRP_MJ_SET_INFORMATION;
+    g_FileGuard.Operations[3].PreOperation  = XdowsFilePreSetInformation;
+    g_FileGuard.Operations[4].MajorFunction = IRP_MJ_OPERATION_END;
 
     g_FileGuard.Contexts[0].ContextType = FLT_STREAMHANDLE_CONTEXT;
     g_FileGuard.Contexts[0].Flags = 0;
