@@ -35,6 +35,7 @@ Environment:
 #include <fltKernel.h>
 #include "driver.h"
 #include "RansomwareMonitor.h"
+#include "selfprotect.h"
 #include <ntstrsafe.h>
 
 //
@@ -196,6 +197,31 @@ XdowsFileAcquireName(
     return status;
 }
 
+static
+BOOLEAN
+XdowsFileDenyProtectedMutation(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCUNICODE_STRING Path
+    )
+{
+    HANDLE requestorProcessId;
+
+    requestorProcessId = FltGetRequestorProcessIdEx(Data);
+    if (!XdowsSelfProtectShouldBlockFileMutation(Path, requestorProcessId)) {
+        return FALSE;
+    }
+
+    XdowsLogWrite(
+        XdowsSecurityLogWarning,
+        0,
+        0,
+        L"SelfProtect",
+        L"External mutation of the guarded application directory was blocked.");
+    Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+    Data->IoStatus.Information = 0;
+    return TRUE;
+}
+
 //
 // Copy a UNICODE_STRING into a fixed wide buffer with NUL termination.
 // Implemented byte-wise so the user-mode scanner always receives a fully
@@ -330,6 +356,16 @@ XdowsFileIsNameChangeClass(
            InfoClass == FileLinkInformationEx;
 }
 
+static
+BOOLEAN
+XdowsFileIsDeleteDispositionClass(
+    _In_ FILE_INFORMATION_CLASS InfoClass
+    )
+{
+    return InfoClass == FileDispositionInformation ||
+           InfoClass == FileDispositionInformationEx;
+}
+
 //
 // TRUE if the PreCreate operation requests write access to the file. This
 // distinguishes opens that will modify the file from read-only opens, which
@@ -362,7 +398,12 @@ XdowsFileIsWriteOpen(
     }
 
     if (FlagOn(desiredAccess, FILE_WRITE_DATA) ||
-        FlagOn(desiredAccess, FILE_APPEND_DATA)) {
+        FlagOn(desiredAccess, FILE_APPEND_DATA) ||
+        FlagOn(desiredAccess, DELETE) ||
+        FlagOn(desiredAccess, FILE_WRITE_EA) ||
+        FlagOn(desiredAccess, FILE_WRITE_ATTRIBUTES) ||
+        FlagOn(desiredAccess, WRITE_DAC) ||
+        FlagOn(desiredAccess, WRITE_OWNER)) {
         return TRUE;
     }
 
@@ -420,6 +461,12 @@ XdowsFilePreCreate(
     status = XdowsFileAcquireName(Data, &name);
     if (!NT_SUCCESS(status)) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    if (XdowsFileIsWriteOpen(Data) &&
+        XdowsFileDenyProtectedMutation(Data, &name->Name)) {
+        FltReleaseFileNameInformation(name);
+        return FLT_PREOP_COMPLETE;
     }
 
     if (!XdowsFileIsScannablePath(&name->Name)) {
@@ -627,6 +674,7 @@ XdowsFilePreSetInformation(
     PFLT_FILE_NAME_INFORMATION destinationName = NULL;
     PFILE_RENAME_INFORMATION nameChangeInformation;
     XDOWS_SECURITY_DECISION verdict;
+    FILE_INFORMATION_CLASS informationClass;
     ULONG nameChangeHeaderLength;
     NTSTATUS status;
 
@@ -636,18 +684,39 @@ XdowsFilePreSetInformation(
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    if (!XdowsFileIsNameChangeClass(
-            Data->Iopb->Parameters.SetFileInformation.FileInformationClass)) {
+    informationClass =
+        Data->Iopb->Parameters.SetFileInformation.FileInformationClass;
+    if (!XdowsFileIsNameChangeClass(informationClass) &&
+        !XdowsFileIsDeleteDispositionClass(informationClass)) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    if (FltObjects->Instance == NULL ||
+        FltObjects->FileObject == NULL) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    status = XdowsFileAcquireName(Data, &name);
+    if (!NT_SUCCESS(status)) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    if (XdowsFileDenyProtectedMutation(Data, &name->Name)) {
+        FltReleaseFileNameInformation(name);
+        return FLT_PREOP_COMPLETE;
+    }
+
+    if (XdowsFileIsDeleteDispositionClass(informationClass)) {
+        FltReleaseFileNameInformation(name);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
     // FILE_RENAME_INFORMATION and FILE_LINK_INFORMATION intentionally share
     // the Flags/RootDirectory/FileNameLength/FileName layout.
     nameChangeHeaderLength = (ULONG)FIELD_OFFSET(FILE_RENAME_INFORMATION, FileName);
-    if (FltObjects->Instance == NULL ||
-        FltObjects->FileObject == NULL ||
-        Data->Iopb->Parameters.SetFileInformation.InfoBuffer == NULL ||
+    if (Data->Iopb->Parameters.SetFileInformation.InfoBuffer == NULL ||
         Data->Iopb->Parameters.SetFileInformation.Length < nameChangeHeaderLength) {
+        FltReleaseFileNameInformation(name);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
@@ -657,11 +726,7 @@ XdowsFilePreSetInformation(
         nameChangeInformation->FileNameLength >
             Data->Iopb->Parameters.SetFileInformation.Length -
                 nameChangeHeaderLength) {
-        return FLT_PREOP_SUCCESS_NO_CALLBACK;
-    }
-
-    status = XdowsFileAcquireName(Data, &name);
-    if (!NT_SUCCESS(status)) {
+        FltReleaseFileNameInformation(name);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
@@ -689,6 +754,12 @@ XdowsFilePreSetInformation(
             L"Name-change destination path query failed; operation allowed",
             status);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    if (XdowsFileDenyProtectedMutation(Data, &destinationName->Name)) {
+        FltReleaseFileNameInformation(destinationName);
+        FltReleaseFileNameInformation(name);
+        return FLT_PREOP_COMPLETE;
     }
 
     if (!XdowsFileIsScannablePath(&name->Name) &&

@@ -33,6 +33,20 @@ Environment:
 #include "driver.h"
 #include "selfprotect.h"
 
+NTKERNELAPI
+NTSTATUS
+PsLookupProcessByProcessId(
+    _In_ HANDLE ProcessId,
+    _Outptr_ PEPROCESS* Process
+    );
+
+NTKERNELAPI
+NTSTATUS
+SeLocateProcessImageName(
+    _In_ PEPROCESS Process,
+    _Outptr_ PUNICODE_STRING* pImageFileName
+    );
+
 //
 // Dangerous process access rights. Stripping these prevents a third party from
 // terminating, injecting into, duplicating, or reconfiguring the guarded
@@ -116,10 +130,75 @@ typedef struct _XDOWS_GUARD_CONTEXT {
     volatile BOOLEAN Active;
     volatile BOOLEAN ExitPermitted;
     volatile HANDLE  GuardedProcessId;
+    USHORT           ProtectedDirectoryLength;
+    WCHAR            ProtectedDirectory[XDOWS_SECURITY_MAX_PATH_CHARS];
     PVOID            CallbackHandle;
 } XDOWS_GUARD_CONTEXT, *PXDOWS_GUARD_CONTEXT;
 
 static XDOWS_GUARD_CONTEXT g_SelfGuard;
+
+static
+NTSTATUS
+XdowsSelfProtectResolveDirectory(
+    _In_ ULONG ProcessId,
+    _Out_writes_(DirectoryChars) PWCHAR Directory,
+    _In_ USHORT DirectoryChars,
+    _Out_ PUSHORT DirectoryLength
+    )
+{
+    PEPROCESS process = NULL;
+    PUNICODE_STRING imagePath = NULL;
+    USHORT imageChars;
+    USHORT directoryChars = 0;
+    USHORT i;
+    NTSTATUS status;
+
+    *DirectoryLength = 0;
+    if (Directory == NULL || DirectoryChars == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    Directory[0] = UNICODE_NULL;
+
+    status = PsLookupProcessByProcessId(ULongToHandle(ProcessId), &process);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = SeLocateProcessImageName(process, &imagePath);
+    ObDereferenceObject(process);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    if (imagePath == NULL || imagePath->Buffer == NULL || imagePath->Length == 0) {
+        status = STATUS_OBJECT_PATH_NOT_FOUND;
+        goto Exit;
+    }
+
+    imageChars = imagePath->Length / sizeof(WCHAR);
+    for (i = imageChars; i > 0; i--) {
+        if (imagePath->Buffer[i - 1] == L'\\') {
+            directoryChars = i - 1;
+            break;
+        }
+    }
+
+    if (directoryChars == 0 || directoryChars >= DirectoryChars) {
+        status = STATUS_NAME_TOO_LONG;
+        goto Exit;
+    }
+
+    RtlCopyMemory(Directory, imagePath->Buffer, directoryChars * sizeof(WCHAR));
+    Directory[directoryChars] = UNICODE_NULL;
+    *DirectoryLength = directoryChars * sizeof(WCHAR);
+    status = STATUS_SUCCESS;
+
+Exit:
+    if (imagePath != NULL) {
+        ExFreePool(imagePath);
+    }
+    return status;
+}
 
 //
 // Read the entire guard state in one locked critical section. Callers then
@@ -332,6 +411,10 @@ XdowsSelfProtectRegisterProcess(
     _In_ ULONG Flags
     )
 {
+    WCHAR protectedDirectory[XDOWS_SECURITY_MAX_PATH_CHARS];
+    USHORT protectedDirectoryLength;
+    NTSTATUS status;
+
     UNREFERENCED_PARAMETER(MainThreadId);
     UNREFERENCED_PARAMETER(Flags);
 
@@ -344,8 +427,29 @@ XdowsSelfProtectRegisterProcess(
         return STATUS_INVALID_PARAMETER;
     }
 
+    status = XdowsSelfProtectResolveDirectory(
+        ProcessId,
+        protectedDirectory,
+        RTL_NUMBER_OF(protectedDirectory),
+        &protectedDirectoryLength);
+    if (!NT_SUCCESS(status)) {
+        XdowsLogWriteStatus(
+            XdowsSecurityLogError,
+            0,
+            0,
+            L"SelfProtect",
+            L"Guarded process directory resolution failed",
+            status);
+        return status;
+    }
+
     ExAcquirePushLockExclusive(&g_SelfGuard.Lock);
     g_SelfGuard.GuardedProcessId = ULongToHandle(ProcessId);
+    g_SelfGuard.ProtectedDirectoryLength = protectedDirectoryLength;
+    RtlCopyMemory(
+        g_SelfGuard.ProtectedDirectory,
+        protectedDirectory,
+        protectedDirectoryLength + sizeof(WCHAR));
     g_SelfGuard.ExitPermitted = FALSE;
     g_SelfGuard.Active = TRUE;
     ExReleasePushLockExclusive(&g_SelfGuard.Lock);
@@ -392,6 +496,10 @@ XdowsSelfProtectClearRegistration(
     g_SelfGuard.Active = FALSE;
     g_SelfGuard.ExitPermitted = FALSE;
     g_SelfGuard.GuardedProcessId = NULL;
+    g_SelfGuard.ProtectedDirectoryLength = 0;
+    RtlSecureZeroMemory(
+        g_SelfGuard.ProtectedDirectory,
+        sizeof(g_SelfGuard.ProtectedDirectory));
     ExReleasePushLockExclusive(&g_SelfGuard.Lock);
 
     XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
@@ -409,4 +517,39 @@ XdowsSelfProtectIsProcessProtected(
     return snapshot.Active &&
            !snapshot.ExitPermitted &&
            snapshot.ProcessId == ProcessId;
+}
+
+BOOLEAN
+XdowsSelfProtectShouldBlockFileMutation(
+    _In_ PCUNICODE_STRING Path,
+    _In_ HANDLE RequestorProcessId
+    )
+{
+    UNICODE_STRING directory;
+    USHORT directoryChars;
+    BOOLEAN block = FALSE;
+
+    if (Path == NULL || Path->Buffer == NULL || Path->Length == 0) {
+        return FALSE;
+    }
+
+    ExAcquirePushLockShared(&g_SelfGuard.Lock);
+    if (g_SelfGuard.Active &&
+        !g_SelfGuard.ExitPermitted &&
+        RequestorProcessId != g_SelfGuard.GuardedProcessId &&
+        g_SelfGuard.ProtectedDirectoryLength > 0 &&
+        Path->Length >= g_SelfGuard.ProtectedDirectoryLength) {
+        directory.Buffer = g_SelfGuard.ProtectedDirectory;
+        directory.Length = g_SelfGuard.ProtectedDirectoryLength;
+        directory.MaximumLength = g_SelfGuard.ProtectedDirectoryLength;
+        directoryChars = directory.Length / sizeof(WCHAR);
+
+        if (RtlPrefixUnicodeString(&directory, (PUNICODE_STRING)Path, TRUE) &&
+            (Path->Length == directory.Length ||
+             Path->Buffer[directoryChars] == L'\\')) {
+            block = TRUE;
+        }
+    }
+    ExReleasePushLockShared(&g_SelfGuard.Lock);
+    return block;
 }
