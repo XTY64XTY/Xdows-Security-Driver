@@ -51,6 +51,9 @@ Environment:
 #ifndef PROCESS_VM_OPERATION
 #define PROCESS_VM_OPERATION 0x0008
 #endif
+#ifndef PROCESS_VM_READ
+#define PROCESS_VM_READ 0x0010
+#endif
 #ifndef PROCESS_VM_WRITE
 #define PROCESS_VM_WRITE 0x0020
 #endif
@@ -59,6 +62,9 @@ Environment:
 #endif
 #ifndef PROCESS_SET_INFORMATION
 #define PROCESS_SET_INFORMATION 0x0200
+#endif
+#ifndef PROCESS_SET_QUOTA
+#define PROCESS_SET_QUOTA 0x0100
 #endif
 #ifndef PROCESS_SUSPEND_RESUME
 #define PROCESS_SUSPEND_RESUME 0x0800
@@ -71,17 +77,28 @@ Environment:
 #ifndef THREAD_SET_THREAD_TOKEN
 #define THREAD_SET_THREAD_TOKEN 0x0080
 #endif
+#ifndef THREAD_IMPERSONATE
+#define THREAD_IMPERSONATE 0x0100
+#endif
+#ifndef THREAD_DIRECT_IMPERSONATION
+#define THREAD_DIRECT_IMPERSONATION 0x0200
+#endif
+#ifndef THREAD_SET_LIMITED_INFORMATION
+#define THREAD_SET_LIMITED_INFORMATION 0x0400
+#endif
 
 #define XDOWS_GUARD_PROCESS_RESTRICTED_MASK                              \
     (PROCESS_TERMINATE        | PROCESS_CREATE_THREAD     |               \
      PROCESS_SET_SESSIONID    | PROCESS_VM_OPERATION      |               \
-     PROCESS_VM_WRITE         | PROCESS_DUP_HANDLE         |               \
+     PROCESS_VM_READ          | PROCESS_VM_WRITE           |               \
+     PROCESS_DUP_HANDLE       | PROCESS_SET_QUOTA          |               \
      PROCESS_SET_INFORMATION  | PROCESS_SUSPEND_RESUME)
 
 #define XDOWS_GUARD_THREAD_RESTRICTED_MASK                                \
-    (THREAD_TERMINATE      | THREAD_SET_CONTEXT         |                \
-     THREAD_SUSPEND_RESUME | THREAD_SET_INFORMATION     |                \
-     THREAD_SET_THREAD_TOKEN)
+    (THREAD_TERMINATE          | THREAD_SET_CONTEXT             |          \
+     THREAD_SUSPEND_RESUME     | THREAD_SET_INFORMATION         |          \
+     THREAD_SET_THREAD_TOKEN   | THREAD_IMPERSONATE             |          \
+     THREAD_DIRECT_IMPERSONATION | THREAD_SET_LIMITED_INFORMATION)
 
 //
 // Single source of truth for the guarded process state. A snapshot is read
