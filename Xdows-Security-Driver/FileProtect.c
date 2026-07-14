@@ -70,6 +70,11 @@ typedef struct _XDOWS_DIRTY_HANDLE_CONTEXT {
     ULONG OriginatorPid;
 } XDOWS_DIRTY_HANDLE_CONTEXT, *PXDOWS_DIRTY_HANDLE_CONTEXT;
 
+typedef struct _XDOWS_CLEANUP_SCAN_CONTEXT {
+    ULONG OriginatorPid;
+    WCHAR Path[XDOWS_SECURITY_MAX_PATH_CHARS];
+} XDOWS_CLEANUP_SCAN_CONTEXT, *PXDOWS_CLEANUP_SCAN_CONTEXT;
+
 static XDOWS_FILE_CONTEXT g_FileGuard;
 
 static
@@ -537,10 +542,17 @@ XdowsFilePreCleanup(
     )
 {
     PXDOWS_DIRTY_HANDLE_CONTEXT dirtyContext = NULL;
+    PXDOWS_CLEANUP_SCAN_CONTEXT scanContext = NULL;
+    PFLT_FILE_NAME_INFORMATION name = NULL;
     NTSTATUS status;
 
-    UNREFERENCED_PARAMETER(Data);
     *CompletionContext = NULL;
+
+    if (KeGetCurrentIrql() > APC_LEVEL ||
+        FltObjects->Instance == NULL ||
+        FltObjects->FileObject == NULL) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
 
     status = FltGetStreamHandleContext(
         FltObjects->Instance,
@@ -550,7 +562,43 @@ XdowsFilePreCleanup(
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
+    status = XdowsFileAcquireName(Data, &name);
+    if (!NT_SUCCESS(status)) {
+        FltReleaseContext(dirtyContext);
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    if (!XdowsFileIsScannablePath(&name->Name) ||
+        !XdowsFilePassesSizeGate(FltObjects)) {
+        FltReleaseFileNameInformation(name);
+        FltReleaseContext(dirtyContext);
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    scanContext = (PXDOWS_CLEANUP_SCAN_CONTEXT)ExAllocatePool2(
+        POOL_FLAG_NON_PAGED,
+        sizeof(*scanContext),
+        'cDsX');
+    if (scanContext == NULL) {
+        FltReleaseFileNameInformation(name);
+        FltReleaseContext(dirtyContext);
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    RtlZeroMemory(scanContext, sizeof(*scanContext));
+    scanContext->OriginatorPid = dirtyContext->OriginatorPid;
+    XdowsFileCopyNameInto(
+        scanContext->Path,
+        RTL_NUMBER_OF(scanContext->Path),
+        &name->Name);
+
+    (VOID)FltDeleteStreamHandleContext(
+        FltObjects->Instance,
+        FltObjects->FileObject,
+        NULL);
+    FltReleaseFileNameInformation(name);
     FltReleaseContext(dirtyContext);
+    *CompletionContext = scanContext;
     return FLT_PREOP_SUCCESS_WITH_CALLBACK;
 }
 
@@ -563,47 +611,25 @@ XdowsFilePostCleanupWhenSafe(
     _In_ FLT_POST_OPERATION_FLAGS Flags
     )
 {
-    PFLT_FILE_NAME_INFORMATION name = NULL;
+    PXDOWS_CLEANUP_SCAN_CONTEXT scanContext;
     XDOWS_SECURITY_DECISION verdict;
-    PXDOWS_DIRTY_HANDLE_CONTEXT dirtyContext = NULL;
+    UNICODE_STRING path;
     NTSTATUS status;
 
-    UNREFERENCED_PARAMETER(CompletionContext);
+    UNREFERENCED_PARAMETER(FltObjects);
     UNREFERENCED_PARAMETER(Flags);
 
+    scanContext = (PXDOWS_CLEANUP_SCAN_CONTEXT)CompletionContext;
+    if (scanContext == NULL) {
+        return FLT_POSTOP_FINISHED_PROCESSING;
+    }
+
     if (!NT_SUCCESS(Data->IoStatus.Status)) {
+        ExFreePoolWithTag(scanContext, 'cDsX');
         return FLT_POSTOP_FINISHED_PROCESSING;
     }
 
-    status = FltGetStreamHandleContext(
-        FltObjects->Instance,
-        FltObjects->FileObject,
-        (PFLT_CONTEXT*)&dirtyContext);
-    if (!NT_SUCCESS(status) || dirtyContext == NULL) {
-        return FLT_POSTOP_FINISHED_PROCESSING;
-    }
-
-    (VOID)FltDeleteStreamHandleContext(
-        FltObjects->Instance,
-        FltObjects->FileObject,
-        NULL);
-
-    if (!XdowsFilePassesSizeGate(FltObjects)) {
-        FltReleaseContext(dirtyContext);
-        return FLT_POSTOP_FINISHED_PROCESSING;
-    }
-
-    status = XdowsFileAcquireName(Data, &name);
-    if (!NT_SUCCESS(status)) {
-        FltReleaseContext(dirtyContext);
-        return FLT_POSTOP_FINISHED_PROCESSING;
-    }
-
-    if (!XdowsFileIsScannablePath(&name->Name)) {
-        FltReleaseFileNameInformation(name);
-        FltReleaseContext(dirtyContext);
-        return FLT_POSTOP_FINISHED_PROCESSING;
-    }
+    RtlInitUnicodeString(&path, scanContext->Path);
 
     //
     // Post-cleanup cannot fail the original operation; report the write
@@ -611,8 +637,8 @@ XdowsFilePostCleanupWhenSafe(
     //
     status = XdowsFileConsultPolicy(
         XdowsSecurityEventFileWrite,
-        &name->Name,
-        dirtyContext->OriginatorPid,
+        &path,
+        scanContext->OriginatorPid,
         &verdict);
 
     if (XdowsFileVerdictBlocks(status, &verdict)) {
@@ -624,8 +650,7 @@ XdowsFilePostCleanupWhenSafe(
             L"Post-cleanup write reported as blocked.");
     }
 
-    FltReleaseFileNameInformation(name);
-    FltReleaseContext(dirtyContext);
+    ExFreePoolWithTag(scanContext, 'cDsX');
     return FLT_POSTOP_FINISHED_PROCESSING;
 }
 
@@ -641,6 +666,9 @@ XdowsFilePostCleanup(
     FLT_POSTOP_CALLBACK_STATUS returnStatus;
 
     if (FlagOn(Flags, FLTFL_POST_OPERATION_DRAINING)) {
+        if (CompletionContext != NULL) {
+            ExFreePoolWithTag(CompletionContext, 'cDsX');
+        }
         return FLT_POSTOP_FINISHED_PROCESSING;
     }
 
@@ -660,6 +688,9 @@ XdowsFilePostCleanup(
         0,
         L"File",
         L"Cleanup scan could not be scheduled safely; operation allowed.");
+    if (CompletionContext != NULL) {
+        ExFreePoolWithTag(CompletionContext, 'cDsX');
+    }
     return FLT_POSTOP_FINISHED_PROCESSING;
 }
 
