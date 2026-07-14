@@ -290,7 +290,6 @@ XdowsSelfProtectPreOperation(
     ACCESS_MASK* desiredAccess;
     ACCESS_MASK restrictedMask = 0;
     HANDLE targetProcessId = NULL;
-    HANDLE callerProcessId;
     XDOWS_GUARD_SNAPSHOT snapshot;
 
     UNREFERENCED_PARAMETER(RegistrationContext);
@@ -305,12 +304,13 @@ XdowsSelfProtectPreOperation(
     }
 
     //
-    // Fast exit: no target, self-targeted, or nothing dangerous requested.
+    // Fast exit: no target or nothing dangerous requested. Do not exempt
+    // handles opened by the guarded process itself: in-process plugins or
+    // compromised code must not be able to terminate, suspend, or rewrite the
+    // host through a real handle. Normal exit uses the voluntary-exit path.
     // These checks need no lock and keep the hot path lock-free.
     //
-    callerProcessId = PsGetCurrentProcessId();
     if (targetProcessId == NULL ||
-        targetProcessId == callerProcessId ||
         (*desiredAccess & restrictedMask) == 0) {
         return OB_PREOP_SUCCESS;
     }
