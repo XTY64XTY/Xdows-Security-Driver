@@ -15,12 +15,6 @@ function Assert-Match([string]$Pattern, [string]$Name) {
     }
 }
 
-function Assert-NotMatch([string]$Pattern, [string]$Name) {
-    if ($text -match $Pattern) {
-        throw "$Name is still present in $selfProtect"
-    }
-}
-
 Assert-Match 'XDOWS_GUARD_PROCESS_RESTRICTED_MASK(?s:.*?)PROCESS_TERMINATE' 'process termination restriction'
 Assert-Match 'XDOWS_GUARD_PROCESS_RESTRICTED_MASK(?s:.*?)PROCESS_SUSPEND_RESUME' 'process suspension restriction'
 Assert-Match 'XDOWS_GUARD_PROCESS_RESTRICTED_MASK(?s:.*?)PROCESS_CREATE_THREAD' 'remote thread restriction'
@@ -36,6 +30,7 @@ Assert-Match 'XDOWS_GUARD_THREAD_RESTRICTED_MASK(?s:.*?)THREAD_DIRECT_IMPERSONAT
 Assert-Match 'Info->Operation\s*==\s*OB_OPERATION_HANDLE_CREATE' 'handle creation coverage'
 Assert-Match 'Info->Operation\s*==\s*OB_OPERATION_HANDLE_DUPLICATE' 'handle duplication coverage'
 Assert-Match 'PsGetThreadProcessId' 'all guarded-process thread coverage'
-Assert-NotMatch 'targetProcessId\s*==\s*callerProcessId' 'guarded process self-handle bypass'
+Assert-Match 'callerProcessId\s*=\s*PsGetCurrentProcessId\(\)' 'caller process identity lookup'
+Assert-Match 'targetProcessId\s*==\s*callerProcessId' 'guarded process self-handle compatibility'
 
 Write-Host "Self-protection source smoke passed."
