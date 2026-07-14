@@ -12,6 +12,7 @@ Abstract:
 
 #include "driver.h"
 #include "moduleregistry.h"
+#include "selfprotect.h"
 #include "tokenauth.h"
 #include <ntstrsafe.h>
 
@@ -483,6 +484,7 @@ XdowsGetState(
     )
 {
     KIRQL oldIrql;
+    HANDLE clientProcessId;
 
     RtlZeroMemory(State, sizeof(*State));
     XdowsInitializeHeader(&State->Header, sizeof(*State));
@@ -493,6 +495,7 @@ XdowsGetState(
     State->DroppedEventCount = g_XdowsDriverContext.DroppedEventCount;
     State->ProcessProtectionEnabled = g_XdowsDriverContext.ProcessProtectionEnabled ? 1 : 0;
     State->FileProtectionEnabled = g_XdowsDriverContext.FileProtectionEnabled ? 1 : 0;
+    clientProcessId = g_XdowsDriverContext.ClientProcessId;
     State->ActiveModules = XdowsModulesGetActiveMask();
     State->ProtocolVersion = XDOWS_SECURITY_PROTOCOL_VERSION;
     State->Capabilities = XDOWS_SECURITY_CAP_PRIORITY_QUEUE |
@@ -503,4 +506,9 @@ XdowsGetState(
     RtlCopyMemory(State->DroppedByType, g_XdowsDriverContext.DroppedByType, sizeof(State->DroppedByType));
     RtlCopyMemory(State->TimedOutByType, g_XdowsDriverContext.TimedOutByType, sizeof(State->TimedOutByType));
     KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+
+    State->SelfProtectionEnabled = XdowsSelfProtectIsProcessProtected(clientProcessId) ? 1 : 0;
+    State->ProtectedProcessId = State->SelfProtectionEnabled
+        ? HandleToULong(clientProcessId)
+        : 0;
 }

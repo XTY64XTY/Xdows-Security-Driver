@@ -16,7 +16,7 @@ Environment:
 
 #pragma once
 
-#define XDOWS_SECURITY_PROTOCOL_VERSION 2u
+#define XDOWS_SECURITY_PROTOCOL_VERSION 3u
 #define XDOWS_SECURITY_DRIVER_BUILD_ID 2026071303ULL
 #define XDOWS_SECURITY_EVENT_TYPE_COUNT 9u
 #define XDOWS_SECURITY_CAP_PRIORITY_QUEUE 0x00000001u
@@ -175,6 +175,8 @@ typedef struct _XDOWS_SECURITY_STATE {
     ULONG DroppedEventCount;
     ULONG ProcessProtectionEnabled;
     ULONG FileProtectionEnabled;
+    ULONG SelfProtectionEnabled;
+    ULONG ProtectedProcessId;
     ULONG ActiveModules;
     ULONG ProtocolVersion;
     ULONG Capabilities;
