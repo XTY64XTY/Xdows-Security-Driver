@@ -39,4 +39,19 @@ DRIVER_INITIALIZE DriverEntry;
 EVT_WDF_DRIVER_UNLOAD XdowsSecurityDriverEvtDriverUnload;
 EVT_WDF_OBJECT_CONTEXT_CLEANUP XdowsSecurityDriverEvtDriverContextCleanup;
 
+NTSTATUS
+XdowsSecurityDriverLockUnload(
+    _Inout_ PDRIVER_OBJECT DriverObject
+    );
+
+BOOLEAN
+XdowsSecurityDriverAuthorizeUnload(
+    VOID
+    );
+
+VOID
+XdowsSecurityDriverRevokeUnload(
+    VOID
+    );
+
 EXTERN_C_END

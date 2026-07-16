@@ -192,6 +192,7 @@ Return Value:
 
         status = XdowsRegisterClient(input, requestorProcessId, output);
         if (NT_SUCCESS(status)) {
+            XdowsSecurityDriverRevokeUnload();
             XdowsFileProtectRevokeUnload();
             information = sizeof(*output);
         }
@@ -377,6 +378,17 @@ Return Value:
         if (!XdowsTokenAuthValidate(input->ShutdownToken)) {
             XdowsLogWrite(XdowsSecurityLogWarning, 0, 0, L"TokenAuth", L"Authorized shutdown denied.");
             status = STATUS_ACCESS_DENIED;
+            break;
+        }
+
+        if (!XdowsSecurityDriverAuthorizeUnload()) {
+            XdowsLogWrite(
+                XdowsSecurityLogError,
+                0,
+                0,
+                L"TokenAuth",
+                L"Authorized shutdown could not enable the SCM unload entry.");
+            status = STATUS_INVALID_DEVICE_STATE;
             break;
         }
 
