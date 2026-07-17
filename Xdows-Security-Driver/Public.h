@@ -97,7 +97,8 @@ typedef enum _XDOWS_SECURITY_DECISION_TYPE {
 typedef enum _XDOWS_SECURITY_MODEL_MODE {
     XdowsSecurityModelStandard = 0,
     XdowsSecurityModelFlash = 1,
-    XdowsSecurityModelPro = 2
+    XdowsSecurityModelPro = 2,
+    XdowsSecurityModelAdaptive = 3
 } XDOWS_SECURITY_MODEL_MODE;
 
 typedef enum _XDOWS_SECURITY_EVENT_FLAGS {
