@@ -21,12 +21,9 @@ Abstract:
     kernel API, the bridge queue, and the shared log facility. A failure here
     never affects other protection modules.
 
-    The kernel wait timeout is deliberately shorter than the bridge default
-    (5s): process creation is synchronous, and under a FileCreate flood the
-    user-mode scan limiter can saturate, which would otherwise queue process
-    launches behind file scans and freeze the shell. The 2s value still
-    leaves room for a Pro-model scan (~480ms) while keeping the system
-    responsive.
+    The initial kernel wait is bounded to the bridge default (5s). If the
+    model confirms a threat, user mode submits Pending and the bridge switches
+    to a separate 25s user-decision phase that fails closed on timeout.
 
 Environment:
 
@@ -52,7 +49,7 @@ Environment:
 // Synchronous user-mode verdict timeout for process-launch decisions.
 // See module header for the rationale behind the shorter-than-default value.
 //
-#define XDOWS_PROCESS_LAUNCH_VERDICT_TIMEOUT_MS 32000u
+#define XDOWS_PROCESS_LAUNCH_VERDICT_TIMEOUT_MS 5000u
 
 typedef struct _XDOWS_PROCESS_CONTEXT {
     volatile BOOLEAN CallbackRegistered;

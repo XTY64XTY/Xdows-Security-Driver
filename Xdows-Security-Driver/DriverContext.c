@@ -237,7 +237,8 @@ XdowsRegisterClient(
     Response->Capabilities = XDOWS_SECURITY_CAP_PRIORITY_QUEUE |
         XDOWS_SECURITY_CAP_DIRTY_WRITE_COALESCING |
         XDOWS_SECURITY_CAP_BUILD_ID |
-        XDOWS_SECURITY_CAP_STARTUP_SELF_PROTECT;
+        XDOWS_SECURITY_CAP_STARTUP_SELF_PROTECT |
+        XDOWS_SECURITY_CAP_USER_DECISION_HOLD;
     Response->DriverBuildId = XDOWS_SECURITY_DRIVER_BUILD_ID;
     tokenStatus = XdowsTokenAuthCopyOneTimeToken(
         Response->ShutdownToken,
@@ -400,6 +401,19 @@ XdowsSubmitDecision(
          entry = entry->Flink) {
         PXDOWS_PENDING_EVENT pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
         if (pending->Event.EventId == Decision->EventId) {
+            if (Decision->Decision == XdowsSecurityDecisionPending) {
+                if (pending->UserDecisionPending || pending->FinalDecisionSubmitted) {
+                    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+                    return STATUS_INVALID_DEVICE_STATE;
+                }
+                pending->UserDecisionPending = TRUE;
+            } else {
+                if (pending->FinalDecisionSubmitted) {
+                    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+                    return STATUS_INVALID_DEVICE_STATE;
+                }
+                pending->FinalDecisionSubmitted = TRUE;
+            }
             RtlCopyMemory(&pending->Decision, Decision, sizeof(*Decision));
             KeSetEvent(&pending->DecisionEvent, IO_NO_INCREMENT, FALSE);
             KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
@@ -422,6 +436,7 @@ XdowsQueueEventAndWait(
     NTSTATUS status;
     PXDOWS_PENDING_EVENT pending;
     BOOLEAN linked = FALSE;
+    BOOLEAN userDecisionPending = FALSE;
 
     RtlZeroMemory(Decision, sizeof(*Decision));
     XdowsInitializeHeader(&Decision->Header, sizeof(*Decision));
@@ -513,13 +528,43 @@ XdowsQueueEventAndWait(
         return STATUS_DEVICE_NOT_CONNECTED;
     }
 
-    timeout.QuadPart = -(LONGLONG)Event->KernelWaitTimeoutMs * 10000LL;
-    status = KeWaitForSingleObject(
-        &pending->DecisionEvent,
-        Executive,
-        KernelMode,
-        FALSE,
-        &timeout);
+    for (;;) {
+        ULONG waitTimeoutMs = userDecisionPending
+            ? XDOWS_SECURITY_USER_DECISION_TIMEOUT_MS
+            : Event->KernelWaitTimeoutMs;
+
+        timeout.QuadPart = -(LONGLONG)waitTimeoutMs * 10000LL;
+        status = KeWaitForSingleObject(
+            &pending->DecisionEvent,
+            Executive,
+            KernelMode,
+            FALSE,
+            &timeout);
+
+        if (status != STATUS_SUCCESS) {
+            break;
+        }
+
+        // SubmitDecision uses the same lock, so copying the verdict and
+        // resetting the notification event while holding it cannot lose a
+        // final decision that arrives immediately after Pending.
+        KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
+        RtlCopyMemory(Decision, &pending->Decision, sizeof(*Decision));
+        userDecisionPending = pending->UserDecisionPending;
+        if (Decision->Decision == XdowsSecurityDecisionPending) {
+            KeResetEvent(&pending->DecisionEvent);
+            KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+            XdowsLogWrite(
+                XdowsSecurityLogInfo,
+                Event->EventId,
+                Event->CorrelationId,
+                L"Decision",
+                L"Confirmed threat is waiting for a user decision.");
+            continue;
+        }
+        KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+        break;
+    }
 
     KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
     if (pending->Linked) {
@@ -532,24 +577,57 @@ XdowsQueueEventAndWait(
     KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
 
     if (status == STATUS_SUCCESS) {
-        RtlCopyMemory(Decision, &pending->Decision, sizeof(*Decision));
+        if (userDecisionPending &&
+            Decision->Decision == XdowsSecurityDecisionTimeout) {
+            Decision->Decision = XdowsSecurityDecisionBlock;
+            Decision->ResultCode = (ULONG)STATUS_TIMEOUT;
+            (VOID)RtlStringCchCopyW(
+                Decision->Reason,
+                RTL_NUMBER_OF(Decision->Reason),
+                L"user-decision-timeout-blocked");
+            XdowsLogWrite(
+                XdowsSecurityLogWarning,
+                Event->EventId,
+                Event->CorrelationId,
+                L"Decision",
+                L"User decision ended without a verdict; operation blocked.");
+        }
         // Successful traffic is represented by state counters. Avoid writing
         // another hot-path log entry for every benign decision.
     } else {
         Decision->EventId = Event->EventId;
-        Decision->Decision = XdowsSecurityDecisionTimeout;
+        Decision->Decision = userDecisionPending
+            ? XdowsSecurityDecisionBlock
+            : XdowsSecurityDecisionTimeout;
+        Decision->ResultCode = (ULONG)status;
+        (VOID)RtlStringCchCopyW(
+            Decision->Reason,
+            RTL_NUMBER_OF(Decision->Reason),
+            userDecisionPending
+                ? L"user-decision-timeout-blocked"
+                : L"infrastructure-timeout-allow");
         KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
         if (Event->EventType < XDOWS_SECURITY_EVENT_TYPE_COUNT) {
             g_XdowsDriverContext.TimedOutByType[Event->EventType]++;
         }
         KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
-        XdowsLogWriteStatus(
-            XdowsSecurityLogWarning,
-            Event->EventId,
-            Event->CorrelationId,
-            L"Queue",
-            L"Event wait timed out",
-            status);
+        if (userDecisionPending) {
+            XdowsLogWriteStatus(
+                XdowsSecurityLogWarning,
+                Event->EventId,
+                Event->CorrelationId,
+                L"Decision",
+                L"User decision timed out; operation blocked",
+                status);
+        } else {
+            XdowsLogWriteStatus(
+                XdowsSecurityLogWarning,
+                Event->EventId,
+                Event->CorrelationId,
+                L"Queue",
+                L"Event wait timed out; infrastructure policy allows",
+                status);
+        }
     }
 
     ExFreePoolWithTag(pending, 'swDX');
@@ -579,7 +657,8 @@ XdowsGetState(
     State->Capabilities = XDOWS_SECURITY_CAP_PRIORITY_QUEUE |
         XDOWS_SECURITY_CAP_DIRTY_WRITE_COALESCING |
         XDOWS_SECURITY_CAP_BUILD_ID |
-        XDOWS_SECURITY_CAP_STARTUP_SELF_PROTECT;
+        XDOWS_SECURITY_CAP_STARTUP_SELF_PROTECT |
+        XDOWS_SECURITY_CAP_USER_DECISION_HOLD;
     State->DriverBuildId = XDOWS_SECURITY_DRIVER_BUILD_ID;
     RtlCopyMemory(State->ReceivedByType, g_XdowsDriverContext.ReceivedByType, sizeof(State->ReceivedByType));
     RtlCopyMemory(State->DroppedByType, g_XdowsDriverContext.DroppedByType, sizeof(State->DroppedByType));
