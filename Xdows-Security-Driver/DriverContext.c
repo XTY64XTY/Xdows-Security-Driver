@@ -16,6 +16,73 @@ Abstract:
 #include "tokenauth.h"
 #include <ntstrsafe.h>
 
+NTKERNELAPI
+NTSTATUS
+PsLookupProcessByProcessId(
+    _In_ HANDLE ProcessId,
+    _Outptr_ PEPROCESS* Process
+    );
+
+NTKERNELAPI
+NTSTATUS
+SeLocateProcessImageName(
+    _In_ PEPROCESS Process,
+    _Outptr_ PUNICODE_STRING* pImageFileName
+    );
+
+static const UNICODE_STRING g_XdowsClientImageName =
+    RTL_CONSTANT_STRING(L"Xdows-Security.exe");
+
+static
+NTSTATUS
+XdowsValidateClientProcess(
+    _In_ ULONG ProcessId
+    )
+{
+    PEPROCESS process = NULL;
+    PUNICODE_STRING imagePath = NULL;
+    UNICODE_STRING imageName;
+    USHORT imageChars;
+    USHORT nameStart = 0;
+    USHORT i;
+    NTSTATUS status;
+
+    status = PsLookupProcessByProcessId(ULongToHandle(ProcessId), &process);
+    if (!NT_SUCCESS(status)) {
+        return STATUS_ACCESS_DENIED;
+    }
+
+    status = SeLocateProcessImageName(process, &imagePath);
+    ObDereferenceObject(process);
+    if (!NT_SUCCESS(status) || imagePath == NULL || imagePath->Buffer == NULL) {
+        if (imagePath != NULL) {
+            ExFreePool(imagePath);
+        }
+        return STATUS_ACCESS_DENIED;
+    }
+
+    imageChars = imagePath->Length / sizeof(WCHAR);
+    for (i = imageChars; i > 0; i--) {
+        if (imagePath->Buffer[i - 1] == L'\\') {
+            nameStart = i;
+            break;
+        }
+    }
+
+    imageName.Buffer = imagePath->Buffer + nameStart;
+    imageName.Length = imagePath->Length - (nameStart * sizeof(WCHAR));
+    imageName.MaximumLength = imageName.Length;
+    if (!RtlEqualUnicodeString(&imageName, &g_XdowsClientImageName, TRUE) ||
+        !XdowsSelfProtectIsClientImageAllowed(imagePath)) {
+        status = STATUS_ACCESS_DENIED;
+    } else {
+        status = STATUS_SUCCESS;
+    }
+
+    ExFreePool(imagePath);
+    return status;
+}
+
 static
 BOOLEAN
 XdowsIsCriticalEventType(
@@ -142,6 +209,16 @@ XdowsRegisterClient(
         return STATUS_ACCESS_DENIED;
     }
 
+    if (!NT_SUCCESS(XdowsValidateClientProcess(RequestorProcessId))) {
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            0,
+            0,
+            L"Bridge",
+            L"Client registration denied because the caller image is not trusted.");
+        return STATUS_ACCESS_DENIED;
+    }
+
     KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
     if (g_XdowsDriverContext.ClientConnected &&
         g_XdowsDriverContext.ClientProcessId != ULongToHandle(RequestorProcessId)) {
@@ -159,7 +236,8 @@ XdowsRegisterClient(
     Response->DefaultKernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
     Response->Capabilities = XDOWS_SECURITY_CAP_PRIORITY_QUEUE |
         XDOWS_SECURITY_CAP_DIRTY_WRITE_COALESCING |
-        XDOWS_SECURITY_CAP_BUILD_ID;
+        XDOWS_SECURITY_CAP_BUILD_ID |
+        XDOWS_SECURITY_CAP_STARTUP_SELF_PROTECT;
     Response->DriverBuildId = XDOWS_SECURITY_DRIVER_BUILD_ID;
     tokenStatus = XdowsTokenAuthCopyOneTimeToken(
         Response->ShutdownToken,
@@ -500,7 +578,8 @@ XdowsGetState(
     State->ProtocolVersion = XDOWS_SECURITY_PROTOCOL_VERSION;
     State->Capabilities = XDOWS_SECURITY_CAP_PRIORITY_QUEUE |
         XDOWS_SECURITY_CAP_DIRTY_WRITE_COALESCING |
-        XDOWS_SECURITY_CAP_BUILD_ID;
+        XDOWS_SECURITY_CAP_BUILD_ID |
+        XDOWS_SECURITY_CAP_STARTUP_SELF_PROTECT;
     State->DriverBuildId = XDOWS_SECURITY_DRIVER_BUILD_ID;
     RtlCopyMemory(State->ReceivedByType, g_XdowsDriverContext.ReceivedByType, sizeof(State->ReceivedByType));
     RtlCopyMemory(State->DroppedByType, g_XdowsDriverContext.DroppedByType, sizeof(State->DroppedByType));
@@ -511,4 +590,6 @@ XdowsGetState(
     State->ProtectedProcessId = State->SelfProtectionEnabled
         ? HandleToULong(clientProcessId)
         : 0;
+    State->StartupProtectionEnabled =
+        XdowsSelfProtectIsStartupProtectionEnabled() ? 1 : 0;
 }

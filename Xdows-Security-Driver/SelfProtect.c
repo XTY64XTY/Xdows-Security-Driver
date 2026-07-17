@@ -33,6 +33,19 @@ Environment:
 #include "driver.h"
 #include "selfprotect.h"
 
+#define XDOWS_STARTUP_KEY_PATH \
+    L"\\REGISTRY\\MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define XDOWS_STARTUP_VALUE_NAME L"Xdows-Security"
+#define XDOWS_STARTUP_REGISTRY_ALTITUDE L"370031.11"
+#define XDOWS_STARTUP_QUERY_BUFFER_BYTES \
+    (FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data) + \
+     (XDOWS_SECURITY_MAX_PATH_CHARS * sizeof(WCHAR)))
+
+static const UNICODE_STRING g_XdowsStartupKeyPath =
+    RTL_CONSTANT_STRING(XDOWS_STARTUP_KEY_PATH);
+static const UNICODE_STRING g_XdowsStartupValueName =
+    RTL_CONSTANT_STRING(XDOWS_STARTUP_VALUE_NAME);
+
 NTKERNELAPI
 NTSTATUS
 PsLookupProcessByProcessId(
@@ -45,6 +58,15 @@ NTSTATUS
 SeLocateProcessImageName(
     _In_ PEPROCESS Process,
     _Outptr_ PUNICODE_STRING* pImageFileName
+    );
+
+NTKERNELAPI
+NTSTATUS
+ObQueryNameString(
+    _In_ PVOID Object,
+    _Out_writes_bytes_opt_(Length) POBJECT_NAME_INFORMATION ObjectNameInfo,
+    _In_ ULONG Length,
+    _Out_ PULONG ReturnLength
     );
 
 //
@@ -129,13 +151,455 @@ typedef struct _XDOWS_GUARD_CONTEXT {
     EX_PUSH_LOCK Lock;
     volatile BOOLEAN Active;
     volatile BOOLEAN ExitPermitted;
+    volatile BOOLEAN StartupProtectionEnabled;
+    volatile BOOLEAN StartupProtectionInitializing;
     volatile HANDLE  GuardedProcessId;
     USHORT           ProtectedDirectoryLength;
     WCHAR            ProtectedDirectory[XDOWS_SECURITY_MAX_PATH_CHARS];
+    USHORT           StartupImagePathLength;
+    WCHAR            StartupImagePath[XDOWS_SECURITY_MAX_PATH_CHARS];
     PVOID            CallbackHandle;
+    LARGE_INTEGER    RegistryCookie;
+    BOOLEAN          RegistryCallbackRegistered;
 } XDOWS_GUARD_CONTEXT, *PXDOWS_GUARD_CONTEXT;
 
 static XDOWS_GUARD_CONTEXT g_SelfGuard;
+
+static
+NTSTATUS
+XdowsSelfProtectCopyProcessImagePath(
+    _In_ ULONG ProcessId,
+    _Out_writes_(PathChars) PWCHAR Path,
+    _In_ USHORT PathChars,
+    _Out_ PUSHORT PathLength
+    )
+{
+    PEPROCESS process = NULL;
+    PUNICODE_STRING imagePath = NULL;
+    NTSTATUS status;
+
+    *PathLength = 0;
+    if (Path == NULL || PathChars == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    Path[0] = UNICODE_NULL;
+
+    status = PsLookupProcessByProcessId(ULongToHandle(ProcessId), &process);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = SeLocateProcessImageName(process, &imagePath);
+    ObDereferenceObject(process);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    if (imagePath == NULL || imagePath->Buffer == NULL ||
+        imagePath->Length == 0 ||
+        imagePath->Length >= PathChars * sizeof(WCHAR)) {
+        status = STATUS_NAME_TOO_LONG;
+        goto Exit;
+    }
+
+    RtlCopyMemory(Path, imagePath->Buffer, imagePath->Length);
+    Path[imagePath->Length / sizeof(WCHAR)] = UNICODE_NULL;
+    *PathLength = imagePath->Length;
+    status = STATUS_SUCCESS;
+
+Exit:
+    if (imagePath != NULL) {
+        ExFreePool(imagePath);
+    }
+    return status;
+}
+
+static
+NTSTATUS
+XdowsSelfProtectResolveStartupImagePath(
+    _In_ PCUNICODE_STRING DosPath,
+    _Out_writes_(PathChars) PWCHAR Path,
+    _In_ USHORT PathChars,
+    _Out_ PUSHORT PathLength
+    )
+{
+    WCHAR objectPathBuffer[XDOWS_SECURITY_MAX_PATH_CHARS + 4];
+    UNICODE_STRING objectPath;
+    OBJECT_ATTRIBUTES objectAttributes;
+    IO_STATUS_BLOCK ioStatus;
+    HANDLE fileHandle = NULL;
+    PFILE_OBJECT fileObject = NULL;
+    POBJECT_NAME_INFORMATION objectName = NULL;
+    ULONG requiredLength = 0;
+    USHORT prefixChars = 0;
+    NTSTATUS status;
+
+    *PathLength = 0;
+    if (DosPath == NULL || DosPath->Buffer == NULL || DosPath->Length == 0 ||
+        Path == NULL || PathChars == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    if (DosPath->Length >= 4 * sizeof(WCHAR) &&
+        DosPath->Buffer[0] == L'\\' && DosPath->Buffer[1] == L'?' &&
+        DosPath->Buffer[2] == L'?' && DosPath->Buffer[3] == L'\\') {
+        prefixChars = 0;
+    } else if (DosPath->Length >= 2 * sizeof(WCHAR) &&
+               DosPath->Buffer[1] == L':') {
+        objectPathBuffer[0] = L'\\';
+        objectPathBuffer[1] = L'?';
+        objectPathBuffer[2] = L'?';
+        objectPathBuffer[3] = L'\\';
+        prefixChars = 4;
+    } else {
+        return STATUS_OBJECT_PATH_SYNTAX_BAD;
+    }
+
+    if ((DosPath->Length / sizeof(WCHAR)) + prefixChars >=
+        RTL_NUMBER_OF(objectPathBuffer)) {
+        return STATUS_NAME_TOO_LONG;
+    }
+
+    RtlCopyMemory(
+        objectPathBuffer + prefixChars,
+        DosPath->Buffer,
+        DosPath->Length);
+    objectPath.Length = DosPath->Length + (prefixChars * sizeof(WCHAR));
+    objectPath.MaximumLength = objectPath.Length + sizeof(WCHAR);
+    objectPath.Buffer = objectPathBuffer;
+    objectPathBuffer[objectPath.Length / sizeof(WCHAR)] = UNICODE_NULL;
+
+    InitializeObjectAttributes(
+        &objectAttributes,
+        &objectPath,
+        OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
+        NULL,
+        NULL);
+    status = ZwCreateFile(
+        &fileHandle,
+        FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        &objectAttributes,
+        &ioStatus,
+        NULL,
+        FILE_ATTRIBUTE_NORMAL,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        FILE_OPEN,
+        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
+        NULL,
+        0);
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
+    status = ObReferenceObjectByHandle(
+        fileHandle,
+        0,
+        *IoFileObjectType,
+        KernelMode,
+        (PVOID*)&fileObject,
+        NULL);
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
+    status = ObQueryNameString(fileObject, NULL, 0, &requiredLength);
+    if (status != STATUS_INFO_LENGTH_MISMATCH || requiredLength == 0) {
+        goto Exit;
+    }
+
+    objectName = (POBJECT_NAME_INFORMATION)ExAllocatePool2(
+        POOL_FLAG_PAGED,
+        requiredLength,
+        'psDX');
+    if (objectName == NULL) {
+        status = STATUS_INSUFFICIENT_RESOURCES;
+        goto Exit;
+    }
+
+    status = ObQueryNameString(
+        fileObject,
+        objectName,
+        requiredLength,
+        &requiredLength);
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
+    if (objectName->Name.Buffer == NULL || objectName->Name.Length == 0 ||
+        objectName->Name.Length >= PathChars * sizeof(WCHAR)) {
+        status = STATUS_NAME_TOO_LONG;
+        goto Exit;
+    }
+
+    RtlCopyMemory(Path, objectName->Name.Buffer, objectName->Name.Length);
+    Path[objectName->Name.Length / sizeof(WCHAR)] = UNICODE_NULL;
+    *PathLength = objectName->Name.Length;
+    status = STATUS_SUCCESS;
+
+Exit:
+    if (objectName != NULL) {
+        ExFreePoolWithTag(objectName, 'psDX');
+    }
+    if (fileObject != NULL) {
+        ObDereferenceObject(fileObject);
+    }
+    if (fileHandle != NULL) {
+        ZwClose(fileHandle);
+    }
+    return status;
+}
+
+static
+BOOLEAN
+XdowsSelfProtectReadStartupValue(
+    _Out_writes_(PathChars) PWCHAR ImagePath,
+    _In_ USHORT PathChars,
+    _Out_ PUSHORT ImagePathLength
+    )
+{
+    UCHAR queryBuffer[XDOWS_STARTUP_QUERY_BUFFER_BYTES];
+    PKEY_VALUE_PARTIAL_INFORMATION valueInfo =
+        (PKEY_VALUE_PARTIAL_INFORMATION)queryBuffer;
+    OBJECT_ATTRIBUTES objectAttributes;
+    HANDLE keyHandle = NULL;
+    ULONG resultLength = 0;
+    PWCHAR data;
+    USHORT dataChars;
+    USHORT pathStart;
+    USHORT pathChars;
+    UNICODE_STRING dosPath;
+    NTSTATUS status;
+
+    *ImagePathLength = 0;
+    ImagePath[0] = UNICODE_NULL;
+    InitializeObjectAttributes(
+        &objectAttributes,
+        (PUNICODE_STRING)&g_XdowsStartupKeyPath,
+        OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
+        NULL,
+        NULL);
+    status = ZwOpenKey(&keyHandle, KEY_QUERY_VALUE, &objectAttributes);
+    if (!NT_SUCCESS(status)) {
+        return FALSE;
+    }
+
+    RtlZeroMemory(queryBuffer, sizeof(queryBuffer));
+    status = ZwQueryValueKey(
+        keyHandle,
+        (PUNICODE_STRING)&g_XdowsStartupValueName,
+        KeyValuePartialInformation,
+        queryBuffer,
+        sizeof(queryBuffer),
+        &resultLength);
+    ZwClose(keyHandle);
+    if (!NT_SUCCESS(status)) {
+        return FALSE;
+    }
+
+    if ((valueInfo->Type != REG_SZ && valueInfo->Type != REG_EXPAND_SZ) ||
+        valueInfo->DataLength < sizeof(WCHAR)) {
+        return TRUE;
+    }
+
+    data = (PWCHAR)valueInfo->Data;
+    dataChars = (USHORT)(valueInfo->DataLength / sizeof(WCHAR));
+    while (dataChars > 0 && data[dataChars - 1] == UNICODE_NULL) {
+        dataChars--;
+    }
+    if (dataChars == 0) {
+        return TRUE;
+    }
+
+    if (data[0] == L'\"') {
+        pathStart = 1;
+        for (pathChars = 0;
+             pathStart + pathChars < dataChars &&
+             data[pathStart + pathChars] != L'\"';
+             pathChars++) {
+        }
+    } else {
+        pathStart = 0;
+        for (pathChars = 0;
+             pathChars < dataChars && data[pathChars] != L' ' &&
+             data[pathChars] != L'\t';
+             pathChars++) {
+        }
+    }
+
+    if (pathChars == 0) {
+        return TRUE;
+    }
+
+    dosPath.Buffer = data + pathStart;
+    dosPath.Length = pathChars * sizeof(WCHAR);
+    dosPath.MaximumLength = dosPath.Length;
+    status = XdowsSelfProtectResolveStartupImagePath(
+        &dosPath,
+        ImagePath,
+        PathChars,
+        ImagePathLength);
+    if (!NT_SUCCESS(status)) {
+        *ImagePathLength = 0;
+        ImagePath[0] = UNICODE_NULL;
+    }
+    return TRUE;
+}
+
+static
+BOOLEAN
+XdowsSelfProtectIsKeyObjectProtected(
+    _In_ PVOID Object,
+    _In_ BOOLEAN IncludeAncestor
+    )
+{
+    PCUNICODE_STRING objectName = NULL;
+    BOOLEAN protectedKey = FALSE;
+    USHORT objectChars;
+    NTSTATUS status;
+
+    if (Object == NULL || !g_SelfGuard.RegistryCallbackRegistered) {
+        return FALSE;
+    }
+
+    status = CmCallbackGetKeyObjectIDEx(
+        &g_SelfGuard.RegistryCookie,
+        Object,
+        NULL,
+        &objectName,
+        0);
+    if (!NT_SUCCESS(status) || objectName == NULL) {
+        return FALSE;
+    }
+
+    if (RtlEqualUnicodeString(
+            (PUNICODE_STRING)objectName,
+            (PUNICODE_STRING)&g_XdowsStartupKeyPath,
+            TRUE)) {
+        protectedKey = TRUE;
+    } else if (IncludeAncestor &&
+               RtlPrefixUnicodeString(
+                   (PUNICODE_STRING)objectName,
+                   (PUNICODE_STRING)&g_XdowsStartupKeyPath,
+                   TRUE)) {
+        objectChars = objectName->Length / sizeof(WCHAR);
+        protectedKey = objectName->Length < g_XdowsStartupKeyPath.Length &&
+            g_XdowsStartupKeyPath.Buffer[objectChars] == L'\\';
+    }
+
+    CmCallbackReleaseKeyObjectIDEx(objectName);
+    return protectedKey;
+}
+
+static
+NTSTATUS
+XdowsSelfProtectRegistryCallback(
+    _In_opt_ PVOID CallbackContext,
+    _In_ PVOID Argument1,
+    _In_ PVOID Argument2
+    )
+{
+    REG_NOTIFY_CLASS notifyClass = (REG_NOTIFY_CLASS)(ULONG_PTR)Argument1;
+    HANDLE guardedProcessId;
+    BOOLEAN startupProtectionEnabled;
+    BOOLEAN block = FALSE;
+
+    UNREFERENCED_PARAMETER(CallbackContext);
+
+    ExAcquirePushLockShared(&g_SelfGuard.Lock);
+    startupProtectionEnabled = g_SelfGuard.StartupProtectionInitializing ||
+        g_SelfGuard.StartupProtectionEnabled;
+    guardedProcessId = g_SelfGuard.GuardedProcessId;
+    if (!startupProtectionEnabled ||
+        (g_SelfGuard.Active &&
+         guardedProcessId == PsGetCurrentProcessId())) {
+        ExReleasePushLockShared(&g_SelfGuard.Lock);
+        return STATUS_SUCCESS;
+    }
+    ExReleasePushLockShared(&g_SelfGuard.Lock);
+
+    switch (notifyClass) {
+    case RegNtPreSetValueKey:
+    {
+        PREG_SET_VALUE_KEY_INFORMATION info =
+            (PREG_SET_VALUE_KEY_INFORMATION)Argument2;
+        block = info != NULL &&
+            info->ValueName != NULL &&
+            RtlEqualUnicodeString(
+                info->ValueName,
+                (PUNICODE_STRING)&g_XdowsStartupValueName,
+                TRUE) &&
+            XdowsSelfProtectIsKeyObjectProtected(info->Object, FALSE);
+        break;
+    }
+    case RegNtPreDeleteValueKey:
+    {
+        PREG_DELETE_VALUE_KEY_INFORMATION info =
+            (PREG_DELETE_VALUE_KEY_INFORMATION)Argument2;
+        block = info != NULL &&
+            info->ValueName != NULL &&
+            RtlEqualUnicodeString(
+                info->ValueName,
+                (PUNICODE_STRING)&g_XdowsStartupValueName,
+                TRUE) &&
+            XdowsSelfProtectIsKeyObjectProtected(info->Object, FALSE);
+        break;
+    }
+    case RegNtPreDeleteKey:
+    {
+        PREG_DELETE_KEY_INFORMATION info =
+            (PREG_DELETE_KEY_INFORMATION)Argument2;
+        block = info != NULL &&
+            XdowsSelfProtectIsKeyObjectProtected(info->Object, FALSE);
+        break;
+    }
+    case RegNtPreRenameKey:
+    {
+        PREG_RENAME_KEY_INFORMATION info =
+            (PREG_RENAME_KEY_INFORMATION)Argument2;
+        block = info != NULL &&
+            XdowsSelfProtectIsKeyObjectProtected(info->Object, TRUE);
+        break;
+    }
+    case RegNtPreRestoreKey:
+    {
+        PREG_RESTORE_KEY_INFORMATION info =
+            (PREG_RESTORE_KEY_INFORMATION)Argument2;
+        block = info != NULL &&
+            XdowsSelfProtectIsKeyObjectProtected(info->Object, TRUE);
+        break;
+    }
+    case RegNtPreReplaceKey:
+    {
+        PREG_REPLACE_KEY_INFORMATION info =
+            (PREG_REPLACE_KEY_INFORMATION)Argument2;
+        block = info != NULL &&
+            XdowsSelfProtectIsKeyObjectProtected(info->Object, TRUE);
+        break;
+    }
+    case RegNtPreUnLoadKey:
+    {
+        PREG_UNLOAD_KEY_INFORMATION info =
+            (PREG_UNLOAD_KEY_INFORMATION)Argument2;
+        block = info != NULL &&
+            XdowsSelfProtectIsKeyObjectProtected(info->Object, TRUE);
+        break;
+    }
+    default:
+        break;
+    }
+
+    if (!block) {
+        return STATUS_SUCCESS;
+    }
+
+    XdowsLogWrite(
+        XdowsSecurityLogWarning,
+        0,
+        0,
+        L"SelfProtect",
+        L"External startup registry mutation denied.");
+    return STATUS_ACCESS_DENIED;
+}
 
 static
 NTSTATUS
@@ -346,14 +810,22 @@ XdowsSelfProtectInitialize(
     OB_OPERATION_REGISTRATION operations[2];
     OB_CALLBACK_REGISTRATION registration;
     UNICODE_STRING altitude;
+    UNICODE_STRING registryAltitude;
+    PDRIVER_OBJECT driverObject;
+    WCHAR startupImagePath[XDOWS_SECURITY_MAX_PATH_CHARS];
+    USHORT startupImagePathLength = 0;
+    BOOLEAN startupProtectionEnabled;
     NTSTATUS status;
 
     RtlZeroMemory(&g_SelfGuard, sizeof(g_SelfGuard));
     ExInitializePushLock(&g_SelfGuard.Lock);
     g_SelfGuard.Active = FALSE;
     g_SelfGuard.ExitPermitted = FALSE;
+    g_SelfGuard.StartupProtectionEnabled = FALSE;
+    g_SelfGuard.StartupProtectionInitializing = TRUE;
     g_SelfGuard.GuardedProcessId = NULL;
     g_SelfGuard.CallbackHandle = NULL;
+    g_SelfGuard.RegistryCallbackRegistered = FALSE;
 
     RtlZeroMemory(operations, sizeof(operations));
     operations[0].ObjectType = PsProcessType;
@@ -379,9 +851,60 @@ XdowsSelfProtectInitialize(
         return status;
     }
 
+    if (g_XdowsDriverContext.Device == NULL) {
+        status = STATUS_INVALID_DEVICE_STATE;
+        goto RegistryRegistrationFailed;
+    }
+
+    driverObject = WdfDriverWdmGetDriverObject(
+        WdfDeviceGetDriver(g_XdowsDriverContext.Device));
+    RtlInitUnicodeString(&registryAltitude, XDOWS_STARTUP_REGISTRY_ALTITUDE);
+    status = CmRegisterCallbackEx(
+        XdowsSelfProtectRegistryCallback,
+        &registryAltitude,
+        driverObject,
+        NULL,
+        &g_SelfGuard.RegistryCookie,
+        NULL);
+    if (!NT_SUCCESS(status)) {
+        goto RegistryRegistrationFailed;
+    }
+    g_SelfGuard.RegistryCallbackRegistered = TRUE;
+
+    startupProtectionEnabled = XdowsSelfProtectReadStartupValue(
+        startupImagePath,
+        RTL_NUMBER_OF(startupImagePath),
+        &startupImagePathLength);
+    ExAcquirePushLockExclusive(&g_SelfGuard.Lock);
+    g_SelfGuard.StartupProtectionEnabled = startupProtectionEnabled;
+    g_SelfGuard.StartupImagePathLength = startupImagePathLength;
+    if (startupImagePathLength > 0) {
+        RtlCopyMemory(
+            g_SelfGuard.StartupImagePath,
+            startupImagePath,
+            startupImagePathLength + sizeof(WCHAR));
+    }
+    g_SelfGuard.StartupProtectionInitializing = FALSE;
+    ExReleasePushLockExclusive(&g_SelfGuard.Lock);
+
     XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
         L"Self-protection callbacks registered.");
     return STATUS_SUCCESS;
+
+RegistryRegistrationFailed:
+    g_SelfGuard.StartupProtectionInitializing = FALSE;
+    if (g_SelfGuard.CallbackHandle != NULL) {
+        ObUnRegisterCallbacks(g_SelfGuard.CallbackHandle);
+        g_SelfGuard.CallbackHandle = NULL;
+    }
+    XdowsLogWriteStatus(
+        XdowsSecurityLogError,
+        0,
+        0,
+        L"SelfProtect",
+        L"Startup registry callback registration failed",
+        status);
+    return status;
 }
 
 VOID
@@ -390,6 +913,13 @@ XdowsSelfProtectShutdown(
     )
 {
     PVOID handle;
+
+    if (g_SelfGuard.RegistryCallbackRegistered) {
+        (VOID)CmUnRegisterCallback(g_SelfGuard.RegistryCookie);
+        g_SelfGuard.RegistryCallbackRegistered = FALSE;
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
+            L"Startup registry callback unregistered.");
+    }
 
     handle = g_SelfGuard.CallbackHandle;
     g_SelfGuard.CallbackHandle = NULL;
@@ -520,6 +1050,100 @@ XdowsSelfProtectIsProcessProtected(
     return snapshot.Active &&
            !snapshot.ExitPermitted &&
            snapshot.ProcessId == ProcessId;
+}
+
+BOOLEAN
+XdowsSelfProtectIsClientImageAllowed(
+    _In_ PCUNICODE_STRING ImagePath
+    )
+{
+    UNICODE_STRING expectedPath;
+    BOOLEAN allowed;
+
+    if (ImagePath == NULL || ImagePath->Buffer == NULL ||
+        ImagePath->Length == 0) {
+        return FALSE;
+    }
+
+    ExAcquirePushLockShared(&g_SelfGuard.Lock);
+    if (!g_SelfGuard.StartupProtectionInitializing &&
+        !g_SelfGuard.StartupProtectionEnabled) {
+        allowed = TRUE;
+    } else if (g_SelfGuard.StartupImagePathLength == 0) {
+        allowed = FALSE;
+    } else {
+        expectedPath.Buffer = g_SelfGuard.StartupImagePath;
+        expectedPath.Length = g_SelfGuard.StartupImagePathLength;
+        expectedPath.MaximumLength = g_SelfGuard.StartupImagePathLength;
+        allowed = RtlEqualUnicodeString(
+            &expectedPath,
+            (PUNICODE_STRING)ImagePath,
+            TRUE);
+    }
+    ExReleasePushLockShared(&g_SelfGuard.Lock);
+    return allowed;
+}
+
+NTSTATUS
+XdowsSelfProtectSetStartupProtection(
+    _In_ ULONG ProcessId,
+    _In_ BOOLEAN Enabled
+    )
+{
+    WCHAR imagePath[XDOWS_SECURITY_MAX_PATH_CHARS];
+    USHORT imagePathLength = 0;
+    NTSTATUS status;
+
+    if (!XdowsSelfProtectIsProcessProtected(ULongToHandle(ProcessId))) {
+        return STATUS_ACCESS_DENIED;
+    }
+
+    if (Enabled) {
+        status = XdowsSelfProtectCopyProcessImagePath(
+            ProcessId,
+            imagePath,
+            RTL_NUMBER_OF(imagePath),
+            &imagePathLength);
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+    }
+
+    ExAcquirePushLockExclusive(&g_SelfGuard.Lock);
+    g_SelfGuard.StartupProtectionEnabled = Enabled;
+    g_SelfGuard.StartupImagePathLength = imagePathLength;
+    RtlSecureZeroMemory(
+        g_SelfGuard.StartupImagePath,
+        sizeof(g_SelfGuard.StartupImagePath));
+    if (imagePathLength > 0) {
+        RtlCopyMemory(
+            g_SelfGuard.StartupImagePath,
+            imagePath,
+            imagePathLength + sizeof(WCHAR));
+    }
+    ExReleasePushLockExclusive(&g_SelfGuard.Lock);
+
+    XdowsLogWrite(
+        XdowsSecurityLogInfo,
+        0,
+        0,
+        L"SelfProtect",
+        Enabled ? L"Startup registry protection enabled."
+                : L"Startup registry protection disabled.");
+    return STATUS_SUCCESS;
+}
+
+BOOLEAN
+XdowsSelfProtectIsStartupProtectionEnabled(
+    VOID
+    )
+{
+    BOOLEAN enabled;
+
+    ExAcquirePushLockShared(&g_SelfGuard.Lock);
+    enabled = g_SelfGuard.StartupProtectionEnabled;
+    ExReleasePushLockShared(&g_SelfGuard.Lock);
+    return enabled;
 }
 
 BOOLEAN

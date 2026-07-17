@@ -123,6 +123,29 @@ XdowsRequireRegisteredClient(
         : STATUS_ACCESS_DENIED;
 }
 
+static
+NTSTATUS
+XdowsRequireProtectedClient(
+    _In_ WDFREQUEST Request,
+    _Out_opt_ PULONG RequestorProcessId
+    )
+{
+    ULONG processId;
+    NTSTATUS status;
+
+    status = XdowsRequireRegisteredClient(Request, &processId);
+    if (RequestorProcessId != NULL) {
+        *RequestorProcessId = processId;
+    }
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    return XdowsSelfProtectIsProcessProtected(ULongToHandle(processId))
+        ? STATUS_SUCCESS
+        : STATUS_ACCESS_DENIED;
+}
+
 VOID
 XdowsSecurityDriverEvtIoDeviceControl(
     _In_ WDFQUEUE Queue,
@@ -359,7 +382,7 @@ Return Value:
     {
         PXDOWS_SECURITY_SHUTDOWN_REQUEST input;
 
-        status = XdowsRequireRegisteredClient(Request, NULL);
+        status = XdowsRequireProtectedClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -398,6 +421,40 @@ Return Value:
         XdowsTokenAuthInvalidate();
         XdowsDisconnectClient();
         status = STATUS_SUCCESS;
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_SET_STARTUP_PROTECTION:
+    {
+        PXDOWS_SECURITY_STARTUP_PROTECTION_REQUEST input;
+        ULONG requestorProcessId;
+
+        status = XdowsRequireProtectedClient(Request, &requestorProcessId);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = WdfRequestRetrieveInputBuffer(
+            Request,
+            sizeof(*input),
+            (PVOID*)&input,
+            NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        if (input->Header.Size != sizeof(*input) ||
+            input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION) {
+            status = STATUS_REVISION_MISMATCH;
+            break;
+        }
+        if (input->ProcessId != requestorProcessId || input->Enabled > 1) {
+            status = STATUS_ACCESS_DENIED;
+            break;
+        }
+
+        status = XdowsSelfProtectSetStartupProtection(
+            input->ProcessId,
+            input->Enabled != 0);
         break;
     }
     default:

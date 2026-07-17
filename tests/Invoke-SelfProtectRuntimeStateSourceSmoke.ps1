@@ -19,10 +19,11 @@ function Assert-Match([string]$Path, [string]$Pattern, [string]$Name) {
     }
 }
 
-Assert-Match $files.Public 'XDOWS_SECURITY_PROTOCOL_VERSION\s+3u' 'protocol v3'
-Assert-Match $files.Public 'ULONG\s+SelfProtectionEnabled;\s*ULONG\s+ProtectedProcessId;' 'self-protection runtime state fields'
+Assert-Match $files.Public 'XDOWS_SECURITY_PROTOCOL_VERSION\s+4u' 'protocol v4'
+Assert-Match $files.Public 'ULONG\s+SelfProtectionEnabled;\s*ULONG\s+ProtectedProcessId;\s*ULONG\s+StartupProtectionEnabled;' 'self-protection runtime state fields'
 Assert-Match $files.Context 'State->SelfProtectionEnabled\s*=\s*XdowsSelfProtectIsProcessProtected\(clientProcessId\)' 'active guarded PID state query'
 Assert-Match $files.Context 'State->ProtectedProcessId\s*=\s*State->SelfProtectionEnabled\s*\?\s*HandleToULong\(clientProcessId\)\s*:\s*0' 'protected PID publication'
+Assert-Match $files.Context 'State->StartupProtectionEnabled\s*=\s*XdowsSelfProtectIsStartupProtectionEnabled\(\)' 'startup protection state publication'
 Assert-Match $files.Context 'KeReleaseSpinLock\(&g_XdowsDriverContext\.Lock,\s*oldIrql\);(?s:.*?)XdowsSelfProtectIsProcessProtected' 'self-protection query below DISPATCH level'
 
 Write-Host "Self-protection runtime state source smoke passed."

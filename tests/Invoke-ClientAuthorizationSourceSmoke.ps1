@@ -32,13 +32,17 @@ foreach ($ioctl in @(
     'GET_NEXT_LOG',
     'DISCONNECT_CLIENT',
     'REGISTER_PROTECTED_PROCESS',
-    'SET_VOLUNTARY_EXIT',
-    'AUTHORIZED_SHUTDOWN'
+    'SET_VOLUNTARY_EXIT'
 )) {
     Assert-Match $files.Queue "(?s)case IOCTL_XDOWS_SECURITY_$ioctl(?:(?!case IOCTL_XDOWS_SECURITY_).)*XdowsRequireRegisteredClient\(Request" "$ioctl registered-client authorization"
 }
 
+foreach ($ioctl in @('AUTHORIZED_SHUTDOWN', 'SET_STARTUP_PROTECTION')) {
+    Assert-Match $files.Queue "(?s)case IOCTL_XDOWS_SECURITY_$ioctl(?:(?!case IOCTL_XDOWS_SECURITY_).)*XdowsRequireProtectedClient\(Request" "$ioctl protected-client authorization"
+}
+
 Assert-Match $files.Queue '(?s)REGISTER_PROTECTED_PROCESS(?:(?!case IOCTL_XDOWS_SECURITY_).)*input->ProcessId\s*!=\s*requestorProcessId' 'protected PID spoofing rejection'
 Assert-Match $files.Queue '(?s)SET_VOLUNTARY_EXIT(?:(?!case IOCTL_XDOWS_SECURITY_).)*input->ProcessId\s*!=\s*requestorProcessId' 'voluntary-exit PID spoofing rejection'
+Assert-Match $files.Context 'SeLocateProcessImageName(?s:.*?)Xdows-Security\.exe(?s:.*?)STATUS_ACCESS_DENIED' 'registered client executable identity validation'
 
 Write-Host "Driver client authorization source smoke passed."
