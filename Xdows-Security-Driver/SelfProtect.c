@@ -398,7 +398,13 @@ XdowsSelfProtectReadStartupValue(
 
     if ((valueInfo->Type != REG_SZ && valueInfo->Type != REG_EXPAND_SZ) ||
         valueInfo->DataLength < sizeof(WCHAR)) {
-        return TRUE;
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            0,
+            0,
+            L"SelfProtect",
+            L"Startup value is invalid; startup protection remains disabled.");
+        return FALSE;
     }
 
     data = (PWCHAR)valueInfo->Data;
@@ -407,7 +413,13 @@ XdowsSelfProtectReadStartupValue(
         dataChars--;
     }
     if (dataChars == 0) {
-        return TRUE;
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            0,
+            0,
+            L"SelfProtect",
+            L"Startup value is empty; startup protection remains disabled.");
+        return FALSE;
     }
 
     if (data[0] == L'\"') {
@@ -427,7 +439,13 @@ XdowsSelfProtectReadStartupValue(
     }
 
     if (pathChars == 0) {
-        return TRUE;
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            0,
+            0,
+            L"SelfProtect",
+            L"Startup command has no executable path; startup protection remains disabled.");
+        return FALSE;
     }
 
     dosPath.Buffer = data + pathStart;
@@ -441,6 +459,14 @@ XdowsSelfProtectReadStartupValue(
     if (!NT_SUCCESS(status)) {
         *ImagePathLength = 0;
         ImagePath[0] = UNICODE_NULL;
+        XdowsLogWriteStatus(
+            XdowsSecurityLogWarning,
+            0,
+            0,
+            L"SelfProtect",
+            L"Startup path could not be resolved; startup protection remains disabled",
+            status);
+        return FALSE;
     }
     return TRUE;
 }
