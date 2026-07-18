@@ -6,7 +6,7 @@ Module Name:
 
 Abstract:
 
-    One-time shutdown token issuance and constant-time validation.
+    Registered-client authorization token issuance and constant-time validation.
 
     This module is intentionally self-contained: it depends only on the kernel
     cryptography primitives and the shared log facility. It registers no
@@ -60,8 +60,9 @@ static XDOWS_TOKEN_AUTH_CONTEXT g_TokenAuthContext;
 
 //
 // Compute a SHA-256 digest over an arbitrary byte range using a transient
-// provider. Token operations are rare (issue once at registration, validate
-// only on authorized shutdown), so the per-call provider cost is negligible
+// provider. Token operations are low volume (issue once at registration,
+// validate for privileged management and authorized shutdown), so the
+// per-call provider cost is negligible
 // and avoids carrying global crypto handles that would need teardown ordering.
 //
 static

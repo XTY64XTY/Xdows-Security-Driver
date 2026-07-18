@@ -4,7 +4,7 @@
 
 The driver repository owns:
 
-- `Public.h` protocol constants, IOCTLs, event structs, decision structs, state structs, shutdown token structs, and log structs.
+- `Public.h` protocol constants, IOCTLs, event structs, decision structs, state structs, authorization token structs, process management structs, and log structs.
 - Kernel event production, pending queue behavior, timeout behavior, token hashing, self-protection, injection protection, and log buffering.
 - Driver package generation through VS/WDK.
 
@@ -25,7 +25,7 @@ The model repository owns:
 
 ## Protocol Version Rules
 
-Current protocol version: `1`.
+Current protocol version: `6`.
 
 Any change to `Public.h` that modifies a struct layout, enum value, IOCTL function code, string buffer length, token length, or device path requires all of the following in the same block:
 
@@ -42,7 +42,7 @@ Do not reuse old enum values for new meanings. Add new values at the end unless 
 
 | IOCTL | Function | C# mirror | Purpose |
 | --- | --- | --- | --- |
-| `IOCTL_XDOWS_SECURITY_REGISTER_CLIENT` | `0x801` | `RegisterClient` | Register the app bridge and return shutdown token once. |
+| `IOCTL_XDOWS_SECURITY_REGISTER_CLIENT` | `0x801` | `RegisterClient` | Register the app bridge and return the privileged authorization token once. |
 | `IOCTL_XDOWS_SECURITY_HEARTBEAT` | `0x802` | `Heartbeat` | Keep bridge liveness fresh. |
 | `IOCTL_XDOWS_SECURITY_GET_NEXT_EVENT` | `0x803` | `GetNextEvent` | Pull one pending protection event. |
 | `IOCTL_XDOWS_SECURITY_SUBMIT_DECISION` | `0x804` | `SubmitDecision` | Return Allow, Block, or Timeout for an event. |
@@ -52,6 +52,11 @@ Do not reuse old enum values for new meanings. Add new values at the end unless 
 | `IOCTL_XDOWS_SECURITY_SET_VOLUNTARY_EXIT` | `0x808` | `SetVoluntaryExit` | Tell the driver the app is intentionally exiting. |
 | `IOCTL_XDOWS_SECURITY_AUTHORIZED_SHUTDOWN` | `0x809` | `AuthorizedShutdown` | Stop protection with the one-time shutdown token. |
 | `IOCTL_XDOWS_SECURITY_GET_NEXT_LOG` | `0x80A` | `GetNextLog` | Pull one buffered driver log entry. |
+| `IOCTL_XDOWS_SECURITY_SET_STARTUP_PROTECTION` | `0x80B` | `SetStartupProtection` | Synchronize startup-entry self-protection. |
+| `IOCTL_XDOWS_SECURITY_QUERY_PROCESSES` | `0x80C` | `QueryProcesses` | Return a token-authorized, paged kernel process snapshot. |
+| `IOCTL_XDOWS_SECURITY_OPERATE_PROCESS` | `0x80D` | `OperateProcess` | Suspend, resume, or terminate a process after protected-client and token validation. |
+
+Process management requests require both the registered, self-protected main process identity and the authorization token issued during registration. The driver rejects PID 0, PID 4, the calling main process, the protected process, and critical processes.
 
 ## Decision Semantics
 

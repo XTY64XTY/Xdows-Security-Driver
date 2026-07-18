@@ -1,0 +1,13 @@
+#pragma once
+
+EXTERN_C_START
+
+NTSTATUS XdowsProcessManagerQuery(
+    _In_ PXDOWS_SECURITY_PROCESS_QUERY_REQUEST Request,
+    _Out_ PXDOWS_SECURITY_PROCESS_QUERY_RESPONSE Response);
+
+NTSTATUS XdowsProcessManagerOperate(
+    _In_ ULONG RequestorProcessId,
+    _In_ PXDOWS_SECURITY_PROCESS_OPERATION_REQUEST Request);
+
+EXTERN_C_END

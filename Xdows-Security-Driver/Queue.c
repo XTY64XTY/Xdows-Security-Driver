@@ -16,6 +16,7 @@ Environment:
 
 #include "driver.h"
 #include "fileprotect.h"
+#include "processmanager.h"
 #include "selfprotect.h"
 #include "tokenauth.h"
 #include "queue.tmh"
@@ -52,6 +53,7 @@ Return Value:
     WDFQUEUE queue;
     NTSTATUS status;
     WDF_IO_QUEUE_CONFIG queueConfig;
+    WDF_OBJECT_ATTRIBUTES queueAttributes;
 
     PAGED_CODE();
 
@@ -69,10 +71,13 @@ Return Value:
     queueConfig.EvtIoDeviceControl = XdowsSecurityDriverEvtIoDeviceControl;
     queueConfig.EvtIoStop = XdowsSecurityDriverEvtIoStop;
 
+    WDF_OBJECT_ATTRIBUTES_INIT(&queueAttributes);
+    queueAttributes.ExecutionLevel = WdfExecutionLevelPassive;
+
     status = WdfIoQueueCreate(
                  Device,
                  &queueConfig,
-                 WDF_NO_OBJECT_ATTRIBUTES,
+                 &queueAttributes,
                  &queue
                  );
 
@@ -455,6 +460,76 @@ Return Value:
         status = XdowsSelfProtectSetStartupProtection(
             input->ProcessId,
             input->Enabled != 0);
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_QUERY_PROCESSES:
+    {
+        PXDOWS_SECURITY_PROCESS_QUERY_REQUEST input;
+        XDOWS_SECURITY_PROCESS_QUERY_REQUEST requestCopy;
+        PXDOWS_SECURITY_PROCESS_QUERY_RESPONSE output;
+
+        status = XdowsRequireProtectedClient(Request, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+        if (input->Header.Size != sizeof(*input) ||
+            input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION ||
+            !XdowsTokenAuthValidate(input->AuthorizationToken)) {
+            status = STATUS_ACCESS_DENIED;
+            break;
+        }
+        RtlCopyMemory(&requestCopy, input, sizeof(requestCopy));
+
+        status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*output), (PVOID*)&output, NULL);
+        if (!NT_SUCCESS(status)) {
+            RtlSecureZeroMemory(requestCopy.AuthorizationToken, sizeof(requestCopy.AuthorizationToken));
+            break;
+        }
+
+        status = XdowsProcessManagerQuery(&requestCopy, output);
+        RtlSecureZeroMemory(requestCopy.AuthorizationToken, sizeof(requestCopy.AuthorizationToken));
+        if (NT_SUCCESS(status)) {
+            information = sizeof(*output);
+        }
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_OPERATE_PROCESS:
+    {
+        PXDOWS_SECURITY_PROCESS_OPERATION_REQUEST input;
+        ULONG requestorProcessId;
+
+        status = XdowsRequireProtectedClient(Request, &requestorProcessId);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(*input), (PVOID*)&input, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+        if (input->Header.Size != sizeof(*input) ||
+            input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION ||
+            !XdowsTokenAuthValidate(input->AuthorizationToken)) {
+            XdowsLogWrite(XdowsSecurityLogWarning, 0, 0, L"ProcessManager",
+                L"Process operation authorization denied.");
+            status = STATUS_ACCESS_DENIED;
+            break;
+        }
+
+        status = XdowsProcessManagerOperate(requestorProcessId, input);
+        RtlSecureZeroMemory(input->AuthorizationToken, sizeof(input->AuthorizationToken));
+        if (NT_SUCCESS(status)) {
+            XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"ProcessManager",
+                L"Authorized process operation completed.");
+        } else {
+            XdowsLogWriteStatus(XdowsSecurityLogWarning, 0, 0, L"ProcessManager",
+                L"Authorized process operation failed", status);
+        }
         break;
     }
     default:

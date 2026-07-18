@@ -31,6 +31,7 @@
     <ClCompile Include="Log.c" />
     <ClCompile Include="ModuleRegistry.c" />
     <ClCompile Include="ProcessProtect.c" />
+    <ClCompile Include="ProcessManager.c" />
     <ClCompile Include="Queue.c" />
     <ClCompile Include="RansomwareMonitor.c" />
     <ClCompile Include="SelfProtect.c" />
@@ -46,6 +47,7 @@
     <ClInclude Include="Log.h" />
     <ClInclude Include="ModuleRegistry.h" />
     <ClInclude Include="ProcessProtect.h" />
+    <ClInclude Include="ProcessManager.h" />
     <ClInclude Include="Public.h" />
     <ClInclude Include="Queue.h" />
     <ClInclude Include="RansomwareMonitor.h" />
