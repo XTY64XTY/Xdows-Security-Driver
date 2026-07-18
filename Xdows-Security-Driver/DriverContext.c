@@ -234,12 +234,7 @@ XdowsRegisterClient(
     Response->Status = STATUS_SUCCESS;
     Response->ProtocolVersion = XDOWS_SECURITY_PROTOCOL_VERSION;
     Response->DefaultKernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
-    Response->Capabilities = XDOWS_SECURITY_CAP_PRIORITY_QUEUE |
-        XDOWS_SECURITY_CAP_DIRTY_WRITE_COALESCING |
-        XDOWS_SECURITY_CAP_BUILD_ID |
-        XDOWS_SECURITY_CAP_STARTUP_SELF_PROTECT |
-        XDOWS_SECURITY_CAP_USER_DECISION_HOLD |
-        XDOWS_SECURITY_CAP_PROCESS_MANAGEMENT;
+    Response->Capabilities = XDOWS_SECURITY_CAPABILITIES;
     Response->DriverBuildId = XDOWS_SECURITY_DRIVER_BUILD_ID;
     tokenStatus = XdowsTokenAuthCopyOneTimeToken(
         Response->ShutdownToken,
@@ -655,11 +650,7 @@ XdowsGetState(
     clientProcessId = g_XdowsDriverContext.ClientProcessId;
     State->ActiveModules = XdowsModulesGetActiveMask();
     State->ProtocolVersion = XDOWS_SECURITY_PROTOCOL_VERSION;
-    State->Capabilities = XDOWS_SECURITY_CAP_PRIORITY_QUEUE |
-        XDOWS_SECURITY_CAP_DIRTY_WRITE_COALESCING |
-        XDOWS_SECURITY_CAP_BUILD_ID |
-        XDOWS_SECURITY_CAP_STARTUP_SELF_PROTECT |
-        XDOWS_SECURITY_CAP_USER_DECISION_HOLD;
+    State->Capabilities = XDOWS_SECURITY_CAPABILITIES;
     State->DriverBuildId = XDOWS_SECURITY_DRIVER_BUILD_ID;
     RtlCopyMemory(State->ReceivedByType, g_XdowsDriverContext.ReceivedByType, sizeof(State->ReceivedByType));
     RtlCopyMemory(State->DroppedByType, g_XdowsDriverContext.DroppedByType, sizeof(State->DroppedByType));

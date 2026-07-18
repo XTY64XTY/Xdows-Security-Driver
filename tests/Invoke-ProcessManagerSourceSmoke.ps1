@@ -4,6 +4,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $public = Get-Content -Raw (Join-Path $repoRoot "Xdows-Security-Driver\Public.h")
 $queue = Get-Content -Raw (Join-Path $repoRoot "Xdows-Security-Driver\Queue.c")
 $manager = Get-Content -Raw (Join-Path $repoRoot "Xdows-Security-Driver\ProcessManager.c")
+$driverContext = Get-Content -Raw (Join-Path $repoRoot "Xdows-Security-Driver\DriverContext.c")
 $project = Get-Content -Raw (Join-Path $repoRoot "Xdows-Security-Driver\Xdows-Security-Driver.vcxproj")
 
 function Assert-Match([string]$Text, [string]$Pattern, [string]$Name) {
@@ -14,6 +15,13 @@ function Assert-Match([string]$Text, [string]$Pattern, [string]$Name) {
 
 Assert-Match $public 'XDOWS_SECURITY_PROTOCOL_VERSION\s+6u' 'protocol v6'
 Assert-Match $public 'XDOWS_SECURITY_CAP_PROCESS_MANAGEMENT\s+0x00000020u' 'process management capability'
+Assert-Match $public 'XDOWS_SECURITY_CAPABILITIES(?s:.*?)XDOWS_SECURITY_CAP_PROCESS_MANAGEMENT' 'shared capability mask includes process management'
+$capabilityAssignments = [regex]::Matches(
+    $driverContext,
+    '(?:Response|State)->Capabilities\s*=\s*XDOWS_SECURITY_CAPABILITIES;')
+if ($capabilityAssignments.Count -ne 2) {
+    throw "Registration and state responses must both use the shared capability mask; found $($capabilityAssignments.Count) assignments."
+}
 Assert-Match $public 'IOCTL_XDOWS_SECURITY_QUERY_PROCESSES' 'process query IOCTL'
 Assert-Match $public 'IOCTL_XDOWS_SECURITY_OPERATE_PROCESS' 'process operation IOCTL'
 Assert-Match $queue 'IOCTL_XDOWS_SECURITY_QUERY_PROCESSES(?s:.*?)XdowsRequireProtectedClient(?s:.*?)XdowsTokenAuthValidate' 'token-authorized process query'
