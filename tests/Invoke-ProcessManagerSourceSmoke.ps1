@@ -33,8 +33,15 @@ if ($manager -match '\(SYSTEM_INFORMATION_CLASS\)' -or
 Assert-Match $manager 'Request->ProcessId\s*==\s*RequestorProcessId' 'self termination guard'
 Assert-Match $manager 'XdowsSelfProtectIsProcessProtected' 'protected process guard'
 Assert-Match $manager 'XdowsProcessManagerQueryCriticalState' 'critical process guard'
-Assert-Match $manager 'ZwSuspendProcess' 'kernel suspend operation'
-Assert-Match $manager 'ZwResumeProcess' 'kernel resume operation'
+Assert-Match $manager 'MmGetSystemRoutineAddress' 'runtime process-control routine resolution'
+Assert-Match $manager 'L"ZwSuspendProcess"' 'runtime suspend routine name'
+Assert-Match $manager 'L"ZwResumeProcess"' 'runtime resume routine name'
+if ($manager -match 'NTSYSAPI(?s:.*?)ZwSuspendProcess\(' -or
+    $manager -match 'NTSYSAPI(?s:.*?)ZwResumeProcess\(' -or
+    $manager -match 'status\s*=\s*ZwSuspendProcess\(' -or
+    $manager -match 'status\s*=\s*ZwResumeProcess\(') {
+    throw 'Process manager still creates unsupported static imports for suspend/resume.'
+}
 Assert-Match $manager 'ZwTerminateProcess' 'kernel terminate operation'
 Assert-Match $project '<ClCompile Include="ProcessManager.c"' 'process manager source project entry'
 Assert-Match $project '<ClInclude Include="ProcessManager.h"' 'process manager header project entry'

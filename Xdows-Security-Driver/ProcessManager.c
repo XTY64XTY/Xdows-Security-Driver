@@ -31,16 +31,7 @@ ZwQueryInformationProcess(
     _In_ ULONG ProcessInformationLength,
     _Out_opt_ PULONG ReturnLength);
 
-NTSYSAPI
-NTSTATUS
-NTAPI
-ZwSuspendProcess(
-    _In_ HANDLE ProcessHandle);
-
-NTSYSAPI
-NTSTATUS
-NTAPI
-ZwResumeProcess(
+typedef NTSTATUS (NTAPI *PXDOWS_PROCESS_CONTROL_ROUTINE)(
     _In_ HANDLE ProcessHandle);
 
 typedef struct _XDOWS_SYSTEM_PROCESS_INFORMATION {
@@ -73,6 +64,24 @@ typedef struct _XDOWS_SYSTEM_PROCESS_INFORMATION {
     SIZE_T PeakPagefileUsage;
     SIZE_T PrivatePageCount;
 } XDOWS_SYSTEM_PROCESS_INFORMATION, *PXDOWS_SYSTEM_PROCESS_INFORMATION;
+
+static
+NTSTATUS
+XdowsProcessManagerInvokeControlRoutine(
+    _In_z_ PCWSTR RoutineName,
+    _In_ HANDLE ProcessHandle)
+{
+    UNICODE_STRING routineName;
+    PXDOWS_PROCESS_CONTROL_ROUTINE routine;
+
+    RtlInitUnicodeString(&routineName, RoutineName);
+    routine = (PXDOWS_PROCESS_CONTROL_ROUTINE)MmGetSystemRoutineAddress(&routineName);
+    if (routine == NULL) {
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    return routine(ProcessHandle);
+}
 
 static
 NTSTATUS
@@ -326,10 +335,14 @@ XdowsProcessManagerOperate(
 
     switch ((XDOWS_SECURITY_PROCESS_OPERATION)Request->Operation) {
     case XdowsSecurityProcessOperationSuspend:
-        status = ZwSuspendProcess(processHandle);
+        status = XdowsProcessManagerInvokeControlRoutine(
+            L"ZwSuspendProcess",
+            processHandle);
         break;
     case XdowsSecurityProcessOperationResume:
-        status = ZwResumeProcess(processHandle);
+        status = XdowsProcessManagerInvokeControlRoutine(
+            L"ZwResumeProcess",
+            processHandle);
         break;
     case XdowsSecurityProcessOperationTerminate:
         status = ZwTerminateProcess(processHandle, STATUS_SUCCESS);
