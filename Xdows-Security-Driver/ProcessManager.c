@@ -8,10 +8,28 @@
 #define XDOWS_PROCESS_BREAK_ON_TERMINATION_CLASS 29
 #define XDOWS_PROCESS_SNAPSHOT_SLACK (64u * 1024u)
 #define XDOWS_PROCESS_SNAPSHOT_ATTEMPTS 3u
+#define XDOWS_PROCESS_ACCESS_TERMINATE 0x0001u
+#define XDOWS_PROCESS_ACCESS_QUERY_INFORMATION 0x0400u
+#define XDOWS_PROCESS_ACCESS_SUSPEND_RESUME 0x0800u
 
-#ifndef PROCESS_SUSPEND_RESUME
-#define PROCESS_SUSPEND_RESUME 0x0800
-#endif
+NTSYSAPI
+NTSTATUS
+NTAPI
+ZwQuerySystemInformation(
+    _In_ ULONG SystemInformationClass,
+    _Out_writes_bytes_opt_(SystemInformationLength) PVOID SystemInformation,
+    _In_ ULONG SystemInformationLength,
+    _Out_opt_ PULONG ReturnLength);
+
+NTSYSAPI
+NTSTATUS
+NTAPI
+ZwQueryInformationProcess(
+    _In_ HANDLE ProcessHandle,
+    _In_ ULONG ProcessInformationClass,
+    _Out_writes_bytes_(ProcessInformationLength) PVOID ProcessInformation,
+    _In_ ULONG ProcessInformationLength,
+    _Out_opt_ PULONG ReturnLength);
 
 NTSYSAPI
 NTSTATUS
@@ -76,7 +94,7 @@ XdowsProcessManagerCaptureSnapshot(
     *SnapshotLength = 0;
 
     status = ZwQuerySystemInformation(
-        (SYSTEM_INFORMATION_CLASS)XDOWS_SYSTEM_PROCESS_INFORMATION_CLASS,
+        XDOWS_SYSTEM_PROCESS_INFORMATION_CLASS,
         NULL,
         0,
         &requiredLength);
@@ -96,7 +114,7 @@ XdowsProcessManagerCaptureSnapshot(
         }
 
         status = ZwQuerySystemInformation(
-            (SYSTEM_INFORMATION_CLASS)XDOWS_SYSTEM_PROCESS_INFORMATION_CLASS,
+            XDOWS_SYSTEM_PROCESS_INFORMATION_CLASS,
             buffer,
             bufferLength,
             &requiredLength);
@@ -251,7 +269,7 @@ XdowsProcessManagerQueryCriticalState(
     *IsCritical = TRUE;
     status = ZwQueryInformationProcess(
         ProcessHandle,
-        (PROCESSINFOCLASS)XDOWS_PROCESS_BREAK_ON_TERMINATION_CLASS,
+        XDOWS_PROCESS_BREAK_ON_TERMINATION_CLASS,
         &breakOnTermination,
         sizeof(breakOnTermination),
         NULL);
@@ -284,10 +302,12 @@ XdowsProcessManagerOperate(
     switch ((XDOWS_SECURITY_PROCESS_OPERATION)Request->Operation) {
     case XdowsSecurityProcessOperationSuspend:
     case XdowsSecurityProcessOperationResume:
-        desiredAccess = PROCESS_QUERY_INFORMATION | PROCESS_SUSPEND_RESUME;
+        desiredAccess = XDOWS_PROCESS_ACCESS_QUERY_INFORMATION |
+            XDOWS_PROCESS_ACCESS_SUSPEND_RESUME;
         break;
     case XdowsSecurityProcessOperationTerminate:
-        desiredAccess = PROCESS_QUERY_INFORMATION | PROCESS_TERMINATE;
+        desiredAccess = XDOWS_PROCESS_ACCESS_QUERY_INFORMATION |
+            XDOWS_PROCESS_ACCESS_TERMINATE;
         break;
     default:
         return STATUS_INVALID_PARAMETER;

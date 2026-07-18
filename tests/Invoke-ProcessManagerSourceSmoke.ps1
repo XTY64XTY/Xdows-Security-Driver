@@ -19,6 +19,17 @@ Assert-Match $public 'IOCTL_XDOWS_SECURITY_OPERATE_PROCESS' 'process operation I
 Assert-Match $queue 'IOCTL_XDOWS_SECURITY_QUERY_PROCESSES(?s:.*?)XdowsRequireProtectedClient(?s:.*?)XdowsTokenAuthValidate' 'token-authorized process query'
 Assert-Match $queue 'IOCTL_XDOWS_SECURITY_OPERATE_PROCESS(?s:.*?)XdowsRequireProtectedClient(?s:.*?)XdowsTokenAuthValidate' 'token-authorized process operation'
 Assert-Match $manager 'ZwQuerySystemInformation' 'kernel process enumeration'
+Assert-Match $manager 'ZwQuerySystemInformation\(\s*_In_ ULONG SystemInformationClass' 'local system information query ABI declaration'
+Assert-Match $manager 'ZwQueryInformationProcess\(\s*_In_ HANDLE ProcessHandle,\s*_In_ ULONG ProcessInformationClass' 'local process information query ABI declaration'
+Assert-Match $manager 'XDOWS_PROCESS_ACCESS_QUERY_INFORMATION\s+0x0400u' 'local query-information access mask'
+Assert-Match $manager 'XDOWS_PROCESS_ACCESS_SUSPEND_RESUME\s+0x0800u' 'local suspend-resume access mask'
+Assert-Match $manager 'XDOWS_PROCESS_ACCESS_TERMINATE\s+0x0001u' 'local terminate access mask'
+if ($manager -match '\(SYSTEM_INFORMATION_CLASS\)' -or
+    $manager -match '\(PROCESSINFOCLASS\)' -or
+    $manager -match '(?<!XDOWS_PROCESS_ACCESS_)PROCESS_QUERY_INFORMATION' -or
+    $manager -match '(?<!XDOWS_PROCESS_ACCESS_)PROCESS_TERMINATE') {
+    throw 'Process manager still depends on WDK declarations that are absent from the Universal KMDF header surface.'
+}
 Assert-Match $manager 'Request->ProcessId\s*==\s*RequestorProcessId' 'self termination guard'
 Assert-Match $manager 'XdowsSelfProtectIsProcessProtected' 'protected process guard'
 Assert-Match $manager 'XdowsProcessManagerQueryCriticalState' 'critical process guard'
