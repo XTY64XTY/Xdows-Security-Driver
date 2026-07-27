@@ -2300,22 +2300,126 @@
       "lastUpdatedAt": "2026-06-12",
       "lastUpdatedBy": "Codex",
       "notes": "B18 documents development prerequisites, VS2026/WDK driver signing, app publish assets, protocol version rules, module boundaries, validation commands, troubleshooting, and safety boundaries across the driver, app, and model repos. The simplified flow is: build driver in VS, build model, build main app."
+    },
+    {
+      "id": "B19",
+      "title": "R0 动态行为防护",
+      "status": "implemented",
+      "implemented": true,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B05",
+        "B07",
+        "B10",
+        "B15"
+      ],
+      "filesLikelyTouched": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\BehaviorRules.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+        "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+        "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs"
+      ],
+      "deliveryConditions": [
+        "现有六条命令行行为规则全部进入统一 Behavior 事件和用户决策路径。",
+        "影子副本破坏、危险进程注入和危险线程注入具有稳定的 BehaviorType 与 correlationId。",
+        "Behavior 模块随驱动强制启动，不提供设置开关，并通过模块位和能力位参与运行状态校验。",
+        "行为事件先进入 25 秒用户决策 hold，再解析目标路径和显示完整拦截窗口；放行继续原操作，拦截或超时则拒绝。"
+      ],
+      "testMethods": [
+        "运行驱动和主程序 R0 行为防护源码冒烟测试。",
+        "运行协议镜像、用户决策超时、模块健康和既有驱动防护回归测试。",
+        "构建 Release x64 Universal 驱动和完整 WinUI 解决方案。",
+        "在可恢复 VM 中执行六条命令规则、影子副本破坏和进程/线程注入放行/拦截端到端测试。"
+      ],
+      "subtasks": [
+        {
+          "id": "B19.1",
+          "title": "完成六条保守命令行行为规则",
+          "status": "verified",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\BehaviorRules.c",
+            "D:\\Code\\Xdows-Security-Driver\\tests\\Invoke-BehaviorProtectionSourceSmoke.ps1 passed"
+          ],
+          "lastUpdatedAt": "2026-07-28",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B19.2",
+          "title": "新增独立 Behavior 事件、模块位和能力位",
+          "status": "verified",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ModuleRegistry.c",
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtocol.cs",
+            "D:\\Code\\Xdows-Security\\tests\\Invoke-DriverBridgeProtocolSmoke.ps1 passed with 176 checks"
+          ],
+          "lastUpdatedAt": "2026-07-28",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B19.3",
+          "title": "关联影子副本破坏与进程线程注入行为",
+          "status": "verified",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ProcessProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\InjectionProtect.c",
+            "D:\\Code\\Xdows-Security\\tests\\Invoke-R0BehaviorProtectionSourceSmoke.ps1 passed"
+          ],
+          "lastUpdatedAt": "2026-07-28",
+          "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B19.4",
+          "title": "强制启用完整用户决策流程",
+          "status": "verified",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security\\Protection\\DriverProtection.cs",
+            "D:\\Code\\Xdows-Security\\Xdows-Security\\App.xaml.cs",
+            "D:\\Code\\Xdows-Security\\tests\\Invoke-SettingsBehaviorPlaceholderRemovalSourceSmoke.ps1 passed",
+            "Release x64 full solution build passed with 0 errors"
+          ],
+          "lastUpdatedAt": "2026-07-28",
+          "lastUpdatedBy": "Codex"
+        }
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\tests\\Invoke-BehaviorProtectionSourceSmoke.ps1 passed",
+        "D:\\Code\\Xdows-Security\\tests\\Invoke-R0BehaviorProtectionSourceSmoke.ps1 passed",
+        "D:\\Code\\Xdows-Security\\tests\\Invoke-DriverBridgeProtocolSmoke.ps1 passed with 176 checks",
+        "Release x64 Universal driver build passed with 0 warnings and 0 errors",
+        "D:\\Code\\Xdows-Security-Driver\\tests\\Invoke-DriverPackageSmoke.ps1 -Configuration Release -Platform x64 passed",
+        "Release x64 full solution build passed with 0 errors and the existing SecurityPage nullable warning only",
+        "D:\\Code\\Xdows-Security\\tests\\Invoke-PublishAssetSmoke.ps1 -Configuration Release -Platform x64 -SkipBuild passed"
+      ],
+      "lastUpdatedAt": "2026-07-28",
+      "lastUpdatedBy": "Codex",
+      "notes": "R0 行为模块随驱动启动且无设置卡。六条命令规则、影子副本破坏及进程/线程注入统一发布为 confirmed Behavior 事件；主程序先提交 Pending 再显示完整决策窗口。高置信命令规则在桥接基础设施不可用时保留 fail-closed，PolicyBypass 和注入保留既有低破坏性的基础设施回退策略。破坏性运行时用例仍应在可恢复 VM 中完成。"
     }
   ],
   "lastCheckpoint": {
     "lastUpdatedAt": "2026-07-28",
     "lastUpdatedBy": "Codex",
-    "summary": "完成并验证 B09.6：增强主进程与线程危险句柄权限剥离。",
+    "summary": "完成 B19：强制启用 R0 动态行为防护并接入用户决策。",
     "evidence": [
-      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.c",
-      "D:\\Code\\Xdows-Security-Driver\\tests\\Invoke-SelfProtectSourceSmoke.ps1 passed",
+      "D:\\Code\\Xdows-Security-Driver\\tests\\Invoke-BehaviorProtectionSourceSmoke.ps1 passed",
+      "D:\\Code\\Xdows-Security\\tests\\Invoke-R0BehaviorProtectionSourceSmoke.ps1 passed",
       "Release x64 Universal driver build passed with 0 warnings and 0 errors",
-      "D:\\Code\\Xdows-Security\\tests\\Invoke-DriverBridgeProtocolSmoke.ps1 passed with 151 checks",
-      "D:\\Code\\Xdows-Security\\tests\\Invoke-PublishAssetSmoke.ps1 -Configuration Release -Platform x64 passed"
+      "D:\\Code\\Xdows-Security\\tests\\Invoke-DriverBridgeProtocolSmoke.ps1 passed with 176 checks",
+      "Release x64 full solution build passed with 0 errors",
+      "D:\\Code\\Xdows-Security\\tests\\Invoke-PublishAssetSmoke.ps1 -Configuration Release -Platform x64 -SkipBuild passed"
     ],
     "next": [
-      "Implement forced R0 behavior protection with user decisions and injection/shadow-copy correlation",
-      "Run VM Driver Verifier and runtime handle-access tests in an elevated disposable VM before public release"
+      "Implement disk-aware .bin boot backup and online restore with explicit disk confirmation",
+      "Run VM Driver Verifier and destructive behavior runtime tests in an elevated disposable VM before public release"
     ]
   }
 }

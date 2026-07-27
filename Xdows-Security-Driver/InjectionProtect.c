@@ -31,6 +31,7 @@ Environment:
 --*/
 
 #include "driver.h"
+#include "BehaviorRules.h"
 #include <ntstrsafe.h>
 
 //
@@ -350,8 +351,17 @@ XdowsInjectionConsultUser(
     event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
     event.EventId = XdowsAllocateEventId();
     event.CorrelationId = event.EventId;
-    event.EventType = Target->EventType;
-    event.Flags = XdowsSecurityEventFlagUserModeRequired;
+    if (XdowsBehaviorProtectIsEnabled()) {
+        event.EventType = XdowsSecurityEventBehavior;
+        event.BehaviorType = Target->EventType == XdowsSecurityEventProcessHandle
+            ? XdowsSecurityBehaviorProcessInjection
+            : XdowsSecurityBehaviorThreadInjection;
+        event.Flags = XdowsSecurityEventFlagUserModeRequired |
+            XdowsSecurityEventFlagThreatConfirmed;
+    } else {
+        event.EventType = Target->EventType;
+        event.Flags = XdowsSecurityEventFlagUserModeRequired;
+    }
     event.ProcessId = HandleToULong(Target->TargetProcessId);
     event.ParentProcessId = Target->TargetThreadId;
     event.CreatingProcessId = SourceProcessId;

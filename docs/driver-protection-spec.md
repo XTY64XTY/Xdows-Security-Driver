@@ -22,13 +22,14 @@ kernel/user-mode boundaries used by B02-B05.
 | R10 | Require a shutdown token | TokenAuth, DriverShutdownToken | ShutdownRequest | Authorized or Denied | B11 |
 | R11 | Detect driver environment and repair | DriverEnvironmentChecker, DriverInstaller | EnvironmentCheck | Repairable or ManualAction | B14 |
 | R12 | Surface every block/log event in the main app | Log, LogService | DriverLog | Display/export | B15 |
+| R13 | Force R0 behavior protection with explicit user decisions | BehaviorRules, ProcessProtect, InjectionProtect, DriverProtection | Behavior | UserAllow, UserBlock, UserTimeout | B19 |
 
 ## Blocking Event Model
 
 All kernel-to-user events use a shared protocol header with version and size.
-The kernel event contains an event id, correlation id, event type, process ids,
-timestamps, path fields, and flags. User mode must return a decision for the
-same event id.
+The kernel event contains an event id, correlation id, event type, behavior
+type, process ids, timestamps, path fields, and flags. User mode must return a
+decision for the same event id.
 
 Decision values:
 
@@ -41,6 +42,11 @@ Decision values:
 B05 process events are emitted before process creation completes. The bridge
 scans the target image and only asks the UI when the scanner reports a threat.
 Safe or unsupported files are allowed without UI.
+
+R13 behavior events are already confirmed by conservative kernel rules and do
+not run through the file model. The bridge submits `Pending` immediately, then
+uses the same bounded interception window as other confirmed threats. Behavior
+protection starts with the driver and has no user-facing enable/disable switch.
 
 ## Failure And Timeout Policy
 

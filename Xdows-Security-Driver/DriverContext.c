@@ -92,7 +92,8 @@ XdowsIsCriticalEventType(
     return EventType == XdowsSecurityEventProcessCreate ||
         EventType == XdowsSecurityEventProcessHandle ||
         EventType == XdowsSecurityEventThreadHandle ||
-        EventType == XdowsSecurityEventImageLoad;
+        EventType == XdowsSecurityEventImageLoad ||
+        EventType == XdowsSecurityEventBehavior;
 }
 
 XDOWS_DRIVER_CONTEXT g_XdowsDriverContext;

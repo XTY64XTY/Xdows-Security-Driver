@@ -13,7 +13,7 @@ function Assert-Match([string]$Text, [string]$Pattern, [string]$Name) {
     }
 }
 
-Assert-Match $public 'XDOWS_SECURITY_PROTOCOL_VERSION\s+6u' 'protocol v6'
+Assert-Match $public 'XDOWS_SECURITY_PROTOCOL_VERSION\s+7u' 'protocol v7'
 Assert-Match $public 'XDOWS_SECURITY_CAP_PROCESS_MANAGEMENT\s+0x00000020u' 'process management capability'
 Assert-Match $public 'XDOWS_SECURITY_CAPABILITIES(?s:.*?)XDOWS_SECURITY_CAP_PROCESS_MANAGEMENT' 'shared capability mask includes process management'
 $capabilityAssignments = [regex]::Matches(

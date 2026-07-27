@@ -25,7 +25,12 @@ The model repository owns:
 
 ## Protocol Version Rules
 
-Current protocol version: `6`.
+Current protocol version: `7`.
+
+Protocol 7 adds the `Behavior` event, the shared `BehaviorType` payload,
+per-type state counters for that event, and the required R0 behavior module
+and capability bits. Protocol 6 builds remain explicit hot-upgrade sources;
+they are not accepted as current runtime peers.
 
 Any change to `Public.h` that modifies a struct layout, enum value, IOCTL function code, string buffer length, token length, or device path requires all of the following in the same block:
 
@@ -63,6 +68,16 @@ Process management requests require both the registered, self-protected main pro
 - `Allow`: continue the original operation.
 - `Block`: deny the original operation.
 - `Timeout`: user-mode decision timeout; confirmed threats map to deny behavior.
+
+`Behavior` events always carry `ThreatConfirmed` and enter the user-decision
+hold before path resolution or UI work. Command-line behavior values 1-6 map
+to shadow-copy destruction, hidden PowerShell, encoded commands, policy bypass,
+download/execute, and LOLBin abuse. Values 7-8 correlate dangerous process and
+thread handle requests from the injection module. User release allows the
+original operation; block or user-decision timeout denies it. If the bridge is
+unavailable before a hold starts, high-confidence command rules retain their
+kernel fail-closed behavior, policy bypass stays fail-open, and injection keeps
+its existing fail-open infrastructure policy.
 
 When the bridge or model fails before a threat is confirmed, user mode allows and logs the failure. When a threat is confirmed and the user refuses or times out, the decision is Block or Timeout.
 

@@ -16,13 +16,14 @@ Abstract:
 
     Rule design notes:
       * VSS deletion is the highest-priority rule because it is the
-        canonical ransomware precursor and must be blocked before the
-        user-mode model scan completes.
+        canonical ransomware precursor and must reach the user-decision path
+        before the command can execute.
       * PowerShell -enc / -encodedcommand and -ExecutionPolicy Bypass are
         matched only when the command line contains "powershell" or "pwsh",
         to avoid flagging legitimate tools that accept similar arguments.
-        PolicyBypass is detected and logged but not blocked in the kernel
-        fast-path; the user-mode model makes the final decision.
+        PolicyBypass is detected like the other rules; user mode makes the
+        final decision, while infrastructure failure remains fail-open only
+        for this lower-confidence rule.
       * Download-and-execute patterns (DownloadString, Net.WebClient,
         certutil -urlcache, mshta http) are LOLBin abuse indicators that
         rarely appear in benign command lines.
@@ -43,6 +44,37 @@ Environment:
 // truncated command line is still evaluated.
 //
 #define XDOWS_BEHAVIOR_MAX_CMD_CHARS  XDOWS_SECURITY_MAX_COMMAND_CHARS
+
+static volatile LONG g_BehaviorProtectionEnabled;
+
+NTSTATUS
+XdowsBehaviorProtectInitialize(
+    VOID
+    )
+{
+    (VOID)InterlockedExchange(&g_BehaviorProtectionEnabled, 1);
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
+        L"R0 behavior protection active.");
+    return STATUS_SUCCESS;
+}
+
+VOID
+XdowsBehaviorProtectShutdown(
+    VOID
+    )
+{
+    (VOID)InterlockedExchange(&g_BehaviorProtectionEnabled, 0);
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
+        L"R0 behavior protection stopped.");
+}
+
+BOOLEAN
+XdowsBehaviorProtectIsEnabled(
+    VOID
+    )
+{
+    return InterlockedCompareExchange(&g_BehaviorProtectionEnabled, 0, 0) != 0;
+}
 
 //
 // Case-insensitive substring search within a lowercased wide buffer.
@@ -117,7 +149,7 @@ XdowsBehaviorLowercaseInto(
 //
 // Rule engine entry point. See header for the rule catalogue.
 //
-XDOWS_BEHAVIOR_TYPE
+XDOWS_SECURITY_BEHAVIOR_TYPE
 XdowsBehaviorInspectCommandLine(
     _In_opt_ PCUNICODE_STRING CommandLine
     )
@@ -127,13 +159,13 @@ XdowsBehaviorInspectCommandLine(
 
     if (CommandLine == NULL || CommandLine->Buffer == NULL ||
         CommandLine->Length == 0) {
-        return XdowsBehaviorNone;
+        return XdowsSecurityBehaviorNone;
     }
 
     XdowsBehaviorLowercaseInto(cmd, RTL_NUMBER_OF(cmd), CommandLine);
     cmdLen = wcsnlen(cmd, RTL_NUMBER_OF(cmd));
     if (cmdLen == 0) {
-        return XdowsBehaviorNone;
+        return XdowsSecurityBehaviorNone;
     }
 
     //
@@ -155,7 +187,7 @@ XdowsBehaviorInspectCommandLine(
         (XdowsBehaviorContainsW(cmd, cmdLen, L"wbadmin") &&
          XdowsBehaviorContainsW(cmd, cmdLen, L"delete") &&
          XdowsBehaviorContainsW(cmd, cmdLen, L"catalog"))) {
-        return XdowsBehaviorVssDeletion;
+        return XdowsSecurityBehaviorVssDeletion;
     }
 
     //
@@ -167,7 +199,7 @@ XdowsBehaviorInspectCommandLine(
         (XdowsBehaviorContainsW(cmd, cmdLen, L"-windowstyle hidden") ||
          XdowsBehaviorContainsW(cmd, cmdLen, L"-w hidden") ||
          XdowsBehaviorContainsW(cmd, cmdLen, L"-win hidden"))) {
-        return XdowsBehaviorHiddenPowerShell;
+        return XdowsSecurityBehaviorHiddenPowerShell;
     }
 
     //
@@ -180,7 +212,7 @@ XdowsBehaviorInspectCommandLine(
          XdowsBehaviorContainsW(cmd, cmdLen, L"-encodedcommand ")) &&
         (XdowsBehaviorContainsW(cmd, cmdLen, L"powershell") ||
          XdowsBehaviorContainsW(cmd, cmdLen, L"pwsh"))) {
-        return XdowsBehaviorEncodedCommand;
+        return XdowsSecurityBehaviorEncodedCommand;
     }
 
     //
@@ -196,7 +228,7 @@ XdowsBehaviorInspectCommandLine(
          XdowsBehaviorContainsW(cmd, cmdLen, L"-epbypass")) &&
         (XdowsBehaviorContainsW(cmd, cmdLen, L"powershell") ||
          XdowsBehaviorContainsW(cmd, cmdLen, L"pwsh"))) {
-        return XdowsBehaviorPolicyBypass;
+        return XdowsSecurityBehaviorPolicyBypass;
     }
 
     //
@@ -209,7 +241,7 @@ XdowsBehaviorInspectCommandLine(
         XdowsBehaviorContainsW(cmd, cmdLen, L"invoke-webrequest") ||
         XdowsBehaviorContainsW(cmd, cmdLen, L"net.webclient") ||
         XdowsBehaviorContainsW(cmd, cmdLen, L"start-bitstransfer")) {
-        return XdowsBehaviorDownloadExecute;
+        return XdowsSecurityBehaviorDownloadExecute;
     }
 
     //
@@ -220,36 +252,38 @@ XdowsBehaviorInspectCommandLine(
     //
     if (XdowsBehaviorContainsW(cmd, cmdLen, L"certutil") &&
         XdowsBehaviorContainsW(cmd, cmdLen, L"-urlcache")) {
-        return XdowsBehaviorLolbinAbuse;
+        return XdowsSecurityBehaviorLolbinAbuse;
     }
 
     if (XdowsBehaviorContainsW(cmd, cmdLen, L"mshta") &&
         (XdowsBehaviorContainsW(cmd, cmdLen, L"http") ||
          XdowsBehaviorContainsW(cmd, cmdLen, L"javascript") ||
          XdowsBehaviorContainsW(cmd, cmdLen, L"vbscript"))) {
-        return XdowsBehaviorLolbinAbuse;
+        return XdowsSecurityBehaviorLolbinAbuse;
     }
 
     if (XdowsBehaviorContainsW(cmd, cmdLen, L"rundll32") &&
         XdowsBehaviorContainsW(cmd, cmdLen, L"javascript:")) {
-        return XdowsBehaviorLolbinAbuse;
+        return XdowsSecurityBehaviorLolbinAbuse;
     }
 
-    return XdowsBehaviorNone;
+    return XdowsSecurityBehaviorNone;
 }
 
 PCWSTR
 XdowsBehaviorTypeName(
-    _In_ XDOWS_BEHAVIOR_TYPE Type
+    _In_ XDOWS_SECURITY_BEHAVIOR_TYPE Type
     )
 {
     switch (Type) {
-    case XdowsBehaviorVssDeletion:       return L"VssDeletion";
-    case XdowsBehaviorHiddenPowerShell:  return L"HiddenPowerShell";
-    case XdowsBehaviorEncodedCommand:    return L"EncodedCommand";
-    case XdowsBehaviorPolicyBypass:      return L"PolicyBypass";
-    case XdowsBehaviorDownloadExecute:   return L"DownloadExecute";
-    case XdowsBehaviorLolbinAbuse:       return L"LolbinAbuse";
+    case XdowsSecurityBehaviorVssDeletion:       return L"VssDeletion";
+    case XdowsSecurityBehaviorHiddenPowerShell:  return L"HiddenPowerShell";
+    case XdowsSecurityBehaviorEncodedCommand:    return L"EncodedCommand";
+    case XdowsSecurityBehaviorPolicyBypass:      return L"PolicyBypass";
+    case XdowsSecurityBehaviorDownloadExecute:   return L"DownloadExecute";
+    case XdowsSecurityBehaviorLolbinAbuse:       return L"LolbinAbuse";
+    case XdowsSecurityBehaviorProcessInjection:  return L"ProcessInjection";
+    case XdowsSecurityBehaviorThreadInjection:   return L"ThreadInjection";
     default:                             return L"None";
     }
 }

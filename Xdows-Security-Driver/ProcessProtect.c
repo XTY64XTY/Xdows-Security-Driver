@@ -182,6 +182,99 @@ XdowsProcessApplyVerdict(
     CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
 }
 
+//
+// Route a confirmed command-line behavior hit through the shared user-decision
+// queue. The behavior module is fail-closed for the five high-confidence
+// attack rules when user mode is unavailable, preserving the protection the
+// old immediate-block path provided. PolicyBypass remains fail-open only for
+// infrastructure failures because it is also used by legitimate management
+// tooling; an explicit user block or user-decision timeout still blocks it.
+//
+static
+BOOLEAN
+XdowsProcessApplyBehaviorPolicy(
+    _Inout_ PXDOWS_SECURITY_EVENT Event,
+    _Inout_ PPS_CREATE_NOTIFY_INFO CreateInfo
+    )
+{
+    UNICODE_STRING commandLine;
+    XDOWS_SECURITY_BEHAVIOR_TYPE behavior;
+    XDOWS_SECURITY_DECISION decision;
+    NTSTATUS status;
+    BOOLEAN infrastructureFailure;
+
+    if (!XdowsBehaviorProtectIsEnabled()) {
+        return FALSE;
+    }
+
+    RtlInitEmptyUnicodeString(
+        &commandLine,
+        Event->CommandLine,
+        XDOWS_SECURITY_MAX_COMMAND_CHARS * sizeof(WCHAR));
+    commandLine.Length = (USHORT)(wcslen(Event->CommandLine) * sizeof(WCHAR));
+
+    behavior = XdowsBehaviorInspectCommandLine(&commandLine);
+    if (behavior == XdowsSecurityBehaviorNone) {
+        return FALSE;
+    }
+
+    Event->EventType = XdowsSecurityEventBehavior;
+    Event->BehaviorType = (ULONG)behavior;
+    Event->Flags |= XdowsSecurityEventFlagThreatConfirmed;
+
+    XdowsLogWrite(
+        XdowsSecurityLogWarning,
+        Event->EventId,
+        Event->CorrelationId,
+        L"Behavior",
+        XdowsBehaviorTypeName(behavior));
+
+    status = XdowsQueueEventAndWait(Event, &decision);
+    infrastructureFailure = !NT_SUCCESS(status) ||
+        decision.Decision == XdowsSecurityDecisionTimeout;
+
+    if (infrastructureFailure) {
+        if (behavior != XdowsSecurityBehaviorPolicyBypass) {
+            CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
+            XdowsLogWriteStatus(
+                XdowsSecurityLogWarning,
+                Event->EventId,
+                Event->CorrelationId,
+                L"Behavior",
+                L"Confirmed behavior blocked because user decision was unavailable",
+                status);
+        } else {
+            XdowsLogWriteStatus(
+                XdowsSecurityLogWarning,
+                Event->EventId,
+                Event->CorrelationId,
+                L"Behavior",
+                L"Policy bypass allowed because user decision infrastructure was unavailable",
+                status);
+        }
+        return TRUE;
+    }
+
+    if (decision.Decision == XdowsSecurityDecisionBlock) {
+        CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            Event->EventId,
+            Event->CorrelationId,
+            L"Behavior",
+            L"Confirmed behavior blocked by user decision.");
+    } else {
+        XdowsLogWrite(
+            XdowsSecurityLogInfo,
+            Event->EventId,
+            Event->CorrelationId,
+            L"Behavior",
+            L"Confirmed behavior released by user decision.");
+    }
+
+    return TRUE;
+}
+
 static
 VOID
 XdowsProcessNotifyRoutine(
@@ -215,41 +308,8 @@ XdowsProcessNotifyRoutine(
         return;
     }
 
-    //
-    // In-kernel behavior fast-path: scan the command line for high-confidence
-    // malicious patterns (VSS deletion, encoded PowerShell, LOLBin abuse).
-    // A hit blocks the launch immediately without waiting for the user-mode
-    // model verdict. This is critical for ransomware precursors (e.g.
-    // "vssadmin delete shadows") which must be stopped before the command
-    // executes, and the user-mode scan round-trip can take up to 2s.
-    //
-    // PolicyBypass (-ExecutionPolicy Bypass) is detected and logged but NOT
-    // blocked in the fast-path: it is a common legitimate pattern in enterprise
-    // admin scripts, SCCM/Intune agents, and installers. It is left for the
-    // user-mode model to decide, which can correlate it with other signals.
-    //
-    {
-        UNICODE_STRING cmdLine;
-        XDOWS_BEHAVIOR_TYPE behavior;
-
-        RtlInitEmptyUnicodeString(&cmdLine, event.CommandLine,
-            XDOWS_SECURITY_MAX_COMMAND_CHARS * sizeof(WCHAR));
-        cmdLine.Length = (USHORT)(wcslen(event.CommandLine) * sizeof(WCHAR));
-
-        behavior = XdowsBehaviorInspectCommandLine(&cmdLine);
-        if (behavior != XdowsBehaviorNone) {
-            XdowsLogWrite(
-                XdowsSecurityLogWarning,
-                event.EventId,
-                event.CorrelationId,
-                L"Process",
-                XdowsBehaviorTypeName(behavior));
-
-            if (behavior != XdowsBehaviorPolicyBypass) {
-                CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
-                return;
-            }
-        }
+    if (XdowsProcessApplyBehaviorPolicy(&event, CreateInfo)) {
+        return;
     }
 
     status = XdowsQueueEventAndWait(&event, &decision);

@@ -11,6 +11,7 @@ Abstract:
 --*/
 
 #include "driver.h"
+#include "behaviorrules.h"
 #include "fileprotect.h"
 #include "injectionprotect.h"
 #include "log.h"
@@ -20,6 +21,7 @@ Abstract:
 typedef enum _XDOWS_MODULE_INDEX {
     XdowsModuleLog = 0,
     XdowsModuleTokenAuth,
+    XdowsModuleBehavior,
     XdowsModuleProcess,
     XdowsModuleFile,
     XdowsModuleInjection,
@@ -41,6 +43,8 @@ XdowsModuleBit(
     switch (Index) {
     case XdowsModuleTokenAuth:
         return XDOWS_SECURITY_MODULE_TOKEN_AUTH;
+    case XdowsModuleBehavior:
+        return XDOWS_SECURITY_MODULE_BEHAVIOR;
     case XdowsModuleProcess:
         return XDOWS_SECURITY_MODULE_PROCESS;
     case XdowsModuleFile:
@@ -126,6 +130,7 @@ XdowsModulesInitialize(
     XdowsMarkStarted(XdowsModuleLog);
 
     XdowsTryStartModule(XdowsModuleTokenAuth, L"TokenAuth", XdowsTokenAuthInitialize);
+    XdowsTryStartModule(XdowsModuleBehavior, L"Behavior", XdowsBehaviorProtectInitialize);
     XdowsTryStartModule(XdowsModuleProcess, L"Process", XdowsProcessProtectInitialize);
     XdowsTryStartModule(XdowsModuleFile, L"File", XdowsFileProtectInitialize);
     XdowsTryStartModule(XdowsModuleInjection, L"Injection", XdowsInjectionProtectInitialize);
@@ -161,6 +166,11 @@ XdowsModulesShutdown(
     if (g_ModuleStarted[XdowsModuleProcess]) {
         XdowsProcessProtectShutdown();
         XdowsMarkStopped(XdowsModuleProcess);
+    }
+
+    if (g_ModuleStarted[XdowsModuleBehavior]) {
+        XdowsBehaviorProtectShutdown();
+        XdowsMarkStopped(XdowsModuleBehavior);
     }
 
     if (g_ModuleStarted[XdowsModuleTokenAuth]) {
