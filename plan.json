@@ -1202,6 +1202,21 @@
           ],
           "lastUpdatedAt": "2026-06-10",
           "lastUpdatedBy": "Codex"
+        },
+        {
+          "id": "B09.6",
+          "title": "增强主进程与线程危险句柄权限剥离",
+          "status": "verified",
+          "implemented": true,
+          "evidence": [
+            "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.c",
+            "D:\\Code\\Xdows-Security-Driver\\tests\\Invoke-SelfProtectSourceSmoke.ps1 passed",
+            "Release x64 Universal driver build passed with 0 warnings and 0 errors",
+            "D:\\Code\\Xdows-Security\\tests\\Invoke-DriverBridgeProtocolSmoke.ps1 passed with 151 checks",
+            "D:\\Code\\Xdows-Security\\tests\\Invoke-PublishAssetSmoke.ps1 -Configuration Release -Platform x64 passed"
+          ],
+          "lastUpdatedAt": "2026-07-28",
+          "lastUpdatedBy": "Codex"
         }
       ],
       "evidence": [
@@ -1211,9 +1226,9 @@
         "D:\\Code\\Xdows-Security\\Xdows-Security\\MainWindow.xaml.cs",
         "dotnet build D:\\Code\\Xdows-Security\\Xdows-Security.slnx -c Debug -p:Platform=x64 passed with 1 SYSLIB0057 warning"
       ],
-      "lastUpdatedAt": "2026-06-10",
+      "lastUpdatedAt": "2026-07-28",
       "lastUpdatedBy": "Codex",
-      "notes": "ObRegisterCallbacks 保护注册的主程序 PID/线程目标，剥离非自愿终止和危险句柄权限；主窗口真正退出前标记 voluntary exit，托盘隐藏不解除保护。PPL 仍按 B01 结论保持 Ob 回调方案。"
+      "notes": "ObRegisterCallbacks 保护注册的主程序 PID/线程目标，剥离非自愿终止和危险句柄权限；主窗口真正退出前标记 voluntary exit，托盘隐藏不解除保护。PPL 仍按 B01 结论保持 Ob 回调方案。B09.6 补齐 THREAD_GET_CONTEXT、WRITE_DAC、WRITE_OWNER 和 DELETE，并通过独立能力位验证运行中驱动身份。"
     },
     {
       "id": "B10",
@@ -2288,28 +2303,19 @@
     }
   ],
   "lastCheckpoint": {
-    "lastUpdatedAt": "2026-06-12",
+    "lastUpdatedAt": "2026-07-28",
     "lastUpdatedBy": "Codex",
-    "summary": "完成 B18：文档、交接与维护；所有 blocks 已 implemented。",
+    "summary": "完成并验证 B09.6：增强主进程与线程危险句柄权限剥离。",
     "evidence": [
-      "D:\\Code\\Xdows-Security-Driver\\README.md",
-      "D:\\Code\\Xdows-Security-Driver\\docs\\protocol-and-maintenance.md",
-      "D:\\Code\\Xdows-Security-Driver\\docs\\driver-packaging-signing.md",
-      "D:\\Code\\Xdows-Security\\README.md",
-      "D:\\Code\\Xdows-Model\\README.md",
-      "D:\\Code\\Xdows-Model\\tests\\Invoke-NativeConsistency.ps1",
-      "D:\\Code\\Xdows-Security\\tests\\Invoke-DriverBridgeProtocolSmoke.ps1",
-      "D:\\Code\\Xdows-Security\\tests\\Invoke-PublishAssetSmoke.ps1",
-      "D:\\Code\\Xdows-Security-Driver\\tests\\Invoke-DriverPackageSmoke.ps1",
-      "D:\\Code\\Xdows-Security-Driver\\tests\\driver-validation-matrix.md",
-      "Invoke-NativeConsistency.ps1 -SkipBuild passed for Standard/Flash/Pro with delta 0.00",
-      "Invoke-DriverBridgeProtocolSmoke.ps1 passed with 95 checks",
-      "Invoke-PublishAssetSmoke.ps1 -SkipBuild passed for driver/model assets",
-      "Invoke-DriverPackageSmoke.ps1 passed against VS2026-generated Debug x64 package"
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\SelfProtect.c",
+      "D:\\Code\\Xdows-Security-Driver\\tests\\Invoke-SelfProtectSourceSmoke.ps1 passed",
+      "Release x64 Universal driver build passed with 0 warnings and 0 errors",
+      "D:\\Code\\Xdows-Security\\tests\\Invoke-DriverBridgeProtocolSmoke.ps1 passed with 151 checks",
+      "D:\\Code\\Xdows-Security\\tests\\Invoke-PublishAssetSmoke.ps1 -Configuration Release -Platform x64 passed"
     ],
     "next": [
-      "Run VM Driver Verifier, E2E, stress, and performance matrix in an elevated disposable VM when verification evidence is required",
-      "Replace VS/WDK development signing with production driver signing before public distribution"
+      "Implement forced R0 behavior protection with user decisions and injection/shadow-copy correlation",
+      "Run VM Driver Verifier and runtime handle-access tests in an elevated disposable VM before public release"
     ]
   }
 }

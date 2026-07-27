@@ -113,6 +113,9 @@ ObQueryNameString(
 #ifndef THREAD_SET_THREAD_TOKEN
 #define THREAD_SET_THREAD_TOKEN 0x0080
 #endif
+#ifndef THREAD_GET_CONTEXT
+#define THREAD_GET_CONTEXT 0x0008
+#endif
 #ifndef THREAD_IMPERSONATE
 #define THREAD_IMPERSONATE 0x0100
 #endif
@@ -128,13 +131,16 @@ ObQueryNameString(
      PROCESS_SET_SESSIONID    | PROCESS_VM_OPERATION      |               \
      PROCESS_VM_READ          | PROCESS_VM_WRITE           |               \
      PROCESS_DUP_HANDLE       | PROCESS_SET_QUOTA          |               \
-     PROCESS_SET_INFORMATION  | PROCESS_SUSPEND_RESUME)
+     PROCESS_SET_INFORMATION  | PROCESS_SUSPEND_RESUME     |               \
+     WRITE_DAC                | WRITE_OWNER                 | DELETE)
 
 #define XDOWS_GUARD_THREAD_RESTRICTED_MASK                                \
-    (THREAD_TERMINATE          | THREAD_SET_CONTEXT             |          \
-     THREAD_SUSPEND_RESUME     | THREAD_SET_INFORMATION         |          \
-     THREAD_SET_THREAD_TOKEN   | THREAD_IMPERSONATE             |          \
-     THREAD_DIRECT_IMPERSONATION | THREAD_SET_LIMITED_INFORMATION)
+    (THREAD_TERMINATE          | THREAD_GET_CONTEXT             |          \
+     THREAD_SET_CONTEXT        | THREAD_SUSPEND_RESUME          |          \
+     THREAD_SET_INFORMATION    | THREAD_SET_THREAD_TOKEN        |          \
+     THREAD_IMPERSONATE        | THREAD_DIRECT_IMPERSONATION    |          \
+     THREAD_SET_LIMITED_INFORMATION | WRITE_DAC                  |          \
+     WRITE_OWNER               | DELETE)
 
 //
 // Single source of truth for the guarded process state. A snapshot is read
