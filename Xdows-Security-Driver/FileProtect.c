@@ -61,6 +61,12 @@ Environment:
 typedef struct _XDOWS_FILE_CONTEXT {
     PFLT_FILTER            FilterHandle;
     volatile LONG          UnloadPermitted;
+    EX_PUSH_LOCK           BootConfigurationLock;
+    BOOLEAN                BootProtectionEnabled;
+    ULONG                  BootDiskNumber;
+    ULONG                  BootVolumeRootCount;
+    WCHAR                  BootVolumeRoots[XDOWS_SECURITY_MAX_BOOT_VOLUME_ROOTS]
+                                          [XDOWS_SECURITY_MAX_BOOT_VOLUME_ROOT_CHARS];
     FLT_OPERATION_REGISTRATION Operations[5];
     FLT_CONTEXT_REGISTRATION Contexts[2];
     FLT_REGISTRATION       Registration;
@@ -68,7 +74,14 @@ typedef struct _XDOWS_FILE_CONTEXT {
 
 typedef struct _XDOWS_DIRTY_HANDLE_CONTEXT {
     ULONG OriginatorPid;
+    BOOLEAN BootProtected;
+    WCHAR Path[XDOWS_SECURITY_MAX_PATH_CHARS];
 } XDOWS_DIRTY_HANDLE_CONTEXT, *PXDOWS_DIRTY_HANDLE_CONTEXT;
+
+typedef struct _XDOWS_BOOT_CREATE_CONTEXT {
+    ULONG OriginatorPid;
+    WCHAR Path[XDOWS_SECURITY_MAX_PATH_CHARS];
+} XDOWS_BOOT_CREATE_CONTEXT, *PXDOWS_BOOT_CREATE_CONTEXT;
 
 typedef struct _XDOWS_CLEANUP_SCAN_CONTEXT {
     ULONG OriginatorPid;
@@ -76,6 +89,144 @@ typedef struct _XDOWS_CLEANUP_SCAN_CONTEXT {
 } XDOWS_CLEANUP_SCAN_CONTEXT, *PXDOWS_CLEANUP_SCAN_CONTEXT;
 
 static XDOWS_FILE_CONTEXT g_FileGuard;
+
+static
+VOID
+XdowsFileCopyNameInto(
+    _Out_writes_(DestinationChars) PWCHAR Destination,
+    _In_ SIZE_T DestinationChars,
+    _In_opt_ PCUNICODE_STRING Source
+    );
+
+static
+NTSTATUS
+XdowsFileAcquireName(
+    _In_ PFLT_CALLBACK_DATA Data,
+    _Outptr_result_maybenull_ PFLT_FILE_NAME_INFORMATION* NameInfo
+    );
+
+static
+BOOLEAN
+XdowsFileIsProtectedBootPath(
+    _In_opt_ PCUNICODE_STRING Path
+    )
+{
+    BOOLEAN protectedPath = FALSE;
+    ULONG index;
+
+    if (Path == NULL || Path->Buffer == NULL || Path->Length == 0) {
+        return FALSE;
+    }
+
+    KeEnterCriticalRegion();
+    ExAcquirePushLockShared(&g_FileGuard.BootConfigurationLock);
+    if (g_FileGuard.BootProtectionEnabled) {
+        for (index = 0; index < g_FileGuard.BootVolumeRootCount; index++) {
+            UNICODE_STRING root;
+            UNICODE_STRING relative;
+            UNICODE_STRING efiPrefix = RTL_CONSTANT_STRING(L"EFI\\Microsoft\\Boot\\");
+            UNICODE_STRING efiDirectory = RTL_CONSTANT_STRING(L"EFI\\Microsoft\\Boot");
+            UNICODE_STRING bcdPath = RTL_CONSTANT_STRING(L"Boot\\BCD");
+
+            RtlInitUnicodeString(&root, g_FileGuard.BootVolumeRoots[index]);
+            if (root.Length == 0 ||
+                Path->Length < root.Length ||
+                !RtlPrefixUnicodeString(&root, (PUNICODE_STRING)Path, TRUE)) {
+                continue;
+            }
+
+            relative.Buffer = Path->Buffer + (root.Length / sizeof(WCHAR));
+            relative.Length = Path->Length - root.Length;
+            relative.MaximumLength = relative.Length;
+            while (relative.Length >= sizeof(WCHAR) &&
+                   relative.Buffer[0] == L'\\') {
+                relative.Buffer++;
+                relative.Length -= sizeof(WCHAR);
+                relative.MaximumLength = relative.Length;
+            }
+
+            protectedPath = RtlPrefixUnicodeString(&efiPrefix, &relative, TRUE) ||
+                RtlEqualUnicodeString(&efiDirectory, &relative, TRUE) ||
+                RtlEqualUnicodeString(&bcdPath, &relative, TRUE);
+            if (protectedPath) {
+                break;
+            }
+        }
+    }
+    ExReleasePushLockShared(&g_FileGuard.BootConfigurationLock);
+    KeLeaveCriticalRegion();
+    return protectedPath;
+}
+
+static
+NTSTATUS
+XdowsFileConsultBootPolicy(
+    _In_ PCUNICODE_STRING Path,
+    _In_ ULONG OriginatorPid,
+    _Out_ PXDOWS_SECURITY_DECISION Decision
+    )
+{
+    XDOWS_SECURITY_EVENT event;
+
+    RtlZeroMemory(&event, sizeof(event));
+    event.Header.Size = sizeof(event);
+    event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
+    event.EventId = XdowsAllocateEventId();
+    event.CorrelationId = event.EventId;
+    event.EventType = XdowsSecurityEventBootWrite;
+    event.Flags = XdowsSecurityEventFlagUserModeRequired |
+        XdowsSecurityEventFlagThreatConfirmed |
+        XdowsSecurityEventFlagFileOpenNameAvailable;
+    event.ProcessId = OriginatorPid;
+    event.CreatingProcessId = HandleToULong(PsGetCurrentProcessId());
+    event.KernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
+    XdowsFileCopyNameInto(
+        event.ImagePath,
+        XDOWS_SECURITY_MAX_PATH_CHARS,
+        Path);
+    return XdowsQueueEventAndWait(&event, Decision);
+}
+
+static
+BOOLEAN
+XdowsFileBootMutationMustBeBlocked(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCUNICODE_STRING Path
+    )
+{
+    XDOWS_SECURITY_DECISION decision;
+    NTSTATUS status;
+
+    if (!XdowsFileIsProtectedBootPath(Path)) {
+        return FALSE;
+    }
+
+    RtlZeroMemory(&decision, sizeof(decision));
+    if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+        status = STATUS_INVALID_DEVICE_STATE;
+    } else {
+        status = XdowsFileConsultBootPolicy(
+            Path,
+            HandleToULong(FltGetRequestorProcessIdEx(Data)),
+            &decision);
+    }
+
+    if (NT_SUCCESS(status) &&
+        decision.Decision == XdowsSecurityDecisionAllow) {
+        return FALSE;
+    }
+
+    XdowsLogWriteStatus(
+        XdowsSecurityLogWarning,
+        decision.EventId,
+        decision.EventId,
+        L"BootProtect",
+        L"EFI or BCD mutation blocked",
+        status);
+    Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+    Data->IoStatus.Information = 0;
+    return TRUE;
+}
 
 static
 FLT_PREOP_CALLBACK_STATUS
@@ -87,6 +238,7 @@ XdowsFilePreWrite(
 {
     PXDOWS_DIRTY_HANDLE_CONTEXT context = NULL;
     PXDOWS_DIRTY_HANDLE_CONTEXT existingContext = NULL;
+    PFLT_FILE_NAME_INFORMATION bootName = NULL;
     NTSTATUS status;
 
     *CompletionContext = NULL;
@@ -102,8 +254,25 @@ XdowsFilePreWrite(
         FltObjects->FileObject,
         (PFLT_CONTEXT*)&existingContext);
     if (NT_SUCCESS(status) && existingContext != NULL) {
+        if (existingContext->BootProtected) {
+            UNICODE_STRING protectedPath;
+            RtlInitUnicodeString(&protectedPath, existingContext->Path);
+            if (XdowsFileBootMutationMustBeBlocked(Data, &protectedPath)) {
+                FltReleaseContext(existingContext);
+                return FLT_PREOP_COMPLETE;
+            }
+        }
         FltReleaseContext(existingContext);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    if (KeGetCurrentIrql() <= APC_LEVEL &&
+        NT_SUCCESS(XdowsFileAcquireName(Data, &bootName))) {
+        if (XdowsFileBootMutationMustBeBlocked(Data, &bootName->Name)) {
+            FltReleaseFileNameInformation(bootName);
+            return FLT_PREOP_COMPLETE;
+        }
+        FltReleaseFileNameInformation(bootName);
     }
 
     status = FltAllocateContext(
@@ -117,6 +286,8 @@ XdowsFilePreWrite(
     }
 
     context->OriginatorPid = HandleToULong(FltGetRequestorProcessIdEx(Data));
+    context->BootProtected = FALSE;
+    context->Path[0] = UNICODE_NULL;
     status = FltSetStreamHandleContext(
         FltObjects->Instance,
         FltObjects->FileObject,
@@ -453,6 +624,7 @@ XdowsFilePreCreate(
     _Outptr_result_maybenull_ PVOID* CompletionContext
     )
 {
+    PXDOWS_BOOT_CREATE_CONTEXT bootContext = NULL;
     PFLT_FILE_NAME_INFORMATION name = NULL;
     NTSTATUS status;
 
@@ -473,6 +645,35 @@ XdowsFilePreCreate(
         XdowsFileDenyProtectedMutation(Data, &name->Name)) {
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_COMPLETE;
+    }
+
+    if (XdowsFileIsWriteOpen(Data) &&
+        XdowsFileIsProtectedBootPath(&name->Name)) {
+        if (XdowsFileBootMutationMustBeBlocked(Data, &name->Name)) {
+            FltReleaseFileNameInformation(name);
+            return FLT_PREOP_COMPLETE;
+        }
+
+        bootContext = (PXDOWS_BOOT_CREATE_CONTEXT)ExAllocatePool2(
+            POOL_FLAG_NON_PAGED,
+            sizeof(*bootContext),
+            'oBsX');
+        if (bootContext == NULL) {
+            Data->IoStatus.Status = STATUS_INSUFFICIENT_RESOURCES;
+            Data->IoStatus.Information = 0;
+            FltReleaseFileNameInformation(name);
+            return FLT_PREOP_COMPLETE;
+        }
+        RtlZeroMemory(bootContext, sizeof(*bootContext));
+        bootContext->OriginatorPid =
+            HandleToULong(FltGetRequestorProcessIdEx(Data));
+        XdowsFileCopyNameInto(
+            bootContext->Path,
+            RTL_NUMBER_OF(bootContext->Path),
+            &name->Name);
+        *CompletionContext = bootContext;
+        FltReleaseFileNameInformation(name);
+        return FLT_PREOP_SUCCESS_WITH_CALLBACK;
     }
 
     if (!XdowsFileIsScannablePath(&name->Name)) {
@@ -531,6 +732,80 @@ XdowsFilePreCreate(
     // dirty only when a real write reaches the minifilter.
     FltReleaseFileNameInformation(name);
     return FLT_PREOP_SUCCESS_NO_CALLBACK;
+}
+
+static
+FLT_POSTOP_CALLBACK_STATUS
+XdowsFilePostCreate(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _In_opt_ PVOID CompletionContext,
+    _In_ FLT_POST_OPERATION_FLAGS Flags
+    )
+{
+    PXDOWS_BOOT_CREATE_CONTEXT bootContext =
+        (PXDOWS_BOOT_CREATE_CONTEXT)CompletionContext;
+    PXDOWS_DIRTY_HANDLE_CONTEXT handleContext = NULL;
+    NTSTATUS status;
+
+    if (bootContext == NULL) {
+        return FLT_POSTOP_FINISHED_PROCESSING;
+    }
+
+    if (FlagOn(Flags, FLTFL_POST_OPERATION_DRAINING) ||
+        !NT_SUCCESS(Data->IoStatus.Status) ||
+        FltObjects->Instance == NULL ||
+        FltObjects->FileObject == NULL) {
+        ExFreePoolWithTag(bootContext, 'oBsX');
+        return FLT_POSTOP_FINISHED_PROCESSING;
+    }
+
+    status = FltAllocateContext(
+        FltObjects->Filter,
+        FLT_STREAMHANDLE_CONTEXT,
+        sizeof(*handleContext),
+        NonPagedPoolNx,
+        (PFLT_CONTEXT*)&handleContext);
+    if (!NT_SUCCESS(status) || handleContext == NULL) {
+        goto FailClosed;
+    }
+
+    RtlZeroMemory(handleContext, sizeof(*handleContext));
+    handleContext->OriginatorPid = bootContext->OriginatorPid;
+    handleContext->BootProtected = TRUE;
+    status = RtlStringCchCopyW(
+        handleContext->Path,
+        RTL_NUMBER_OF(handleContext->Path),
+        bootContext->Path);
+    if (NT_SUCCESS(status)) {
+        status = FltSetStreamHandleContext(
+            FltObjects->Instance,
+            FltObjects->FileObject,
+            FLT_SET_CONTEXT_KEEP_IF_EXISTS,
+            handleContext,
+            NULL);
+    }
+    FltReleaseContext(handleContext);
+    if (!NT_SUCCESS(status)) {
+        goto FailClosed;
+    }
+
+    ExFreePoolWithTag(bootContext, 'oBsX');
+    return FLT_POSTOP_FINISHED_PROCESSING;
+
+FailClosed:
+    FltCancelFileOpen(FltObjects->Instance, FltObjects->FileObject);
+    Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+    Data->IoStatus.Information = 0;
+    XdowsLogWriteStatus(
+        XdowsSecurityLogError,
+        0,
+        0,
+        L"BootProtect",
+        L"Protected boot handle context could not be retained; open denied",
+        status);
+    ExFreePoolWithTag(bootContext, 'oBsX');
+    return FLT_POSTOP_FINISHED_PROCESSING;
 }
 
 static
@@ -738,6 +1013,15 @@ XdowsFilePreSetInformation(
         return FLT_PREOP_COMPLETE;
     }
 
+    if (XdowsFileIsProtectedBootPath(&name->Name)) {
+        if (XdowsFileBootMutationMustBeBlocked(Data, &name->Name)) {
+            FltReleaseFileNameInformation(name);
+            return FLT_PREOP_COMPLETE;
+        }
+        FltReleaseFileNameInformation(name);
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
     if (XdowsFileIsDeleteDispositionClass(informationClass)) {
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
@@ -792,6 +1076,17 @@ XdowsFilePreSetInformation(
         FltReleaseFileNameInformation(destinationName);
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_COMPLETE;
+    }
+
+    if (XdowsFileIsProtectedBootPath(&destinationName->Name)) {
+        if (XdowsFileBootMutationMustBeBlocked(Data, &destinationName->Name)) {
+            FltReleaseFileNameInformation(destinationName);
+            FltReleaseFileNameInformation(name);
+            return FLT_PREOP_COMPLETE;
+        }
+        FltReleaseFileNameInformation(destinationName);
+        FltReleaseFileNameInformation(name);
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
     if (!XdowsFileIsScannablePath(&name->Name) &&
@@ -878,9 +1173,11 @@ XdowsFileProtectInitialize(
 
     RtlZeroMemory(&g_FileGuard, sizeof(g_FileGuard));
     (VOID)InterlockedExchange(&g_FileGuard.UnloadPermitted, 0);
+    ExInitializePushLock(&g_FileGuard.BootConfigurationLock);
 
     g_FileGuard.Operations[0].MajorFunction = IRP_MJ_CREATE;
     g_FileGuard.Operations[0].PreOperation  = XdowsFilePreCreate;
+    g_FileGuard.Operations[0].PostOperation = XdowsFilePostCreate;
     g_FileGuard.Operations[1].MajorFunction = IRP_MJ_WRITE;
     g_FileGuard.Operations[1].PreOperation = XdowsFilePreWrite;
     g_FileGuard.Operations[2].MajorFunction = IRP_MJ_CLEANUP;
@@ -934,6 +1231,14 @@ XdowsFileProtectShutdown(
 {
     PFLT_FILTER filter;
 
+    KeEnterCriticalRegion();
+    ExAcquirePushLockExclusive(&g_FileGuard.BootConfigurationLock);
+    g_FileGuard.BootProtectionEnabled = FALSE;
+    g_FileGuard.BootVolumeRootCount = 0;
+    RtlZeroMemory(g_FileGuard.BootVolumeRoots, sizeof(g_FileGuard.BootVolumeRoots));
+    ExReleasePushLockExclusive(&g_FileGuard.BootConfigurationLock);
+    KeLeaveCriticalRegion();
+
     (VOID)InterlockedExchange(&g_FileGuard.UnloadPermitted, 0);
     filter = g_FileGuard.FilterHandle;
     g_FileGuard.FilterHandle = NULL;
@@ -982,4 +1287,75 @@ XdowsFileProtectIsPathScannable(
     )
 {
     return XdowsFileIsScannablePath(Path);
+}
+
+NTSTATUS
+XdowsFileProtectConfigureBootProtection(
+    _In_ PXDOWS_SECURITY_BOOT_PROTECTION_REQUEST Request
+    )
+{
+    ULONG index;
+
+    if (Request == NULL ||
+        Request->Enabled > 1 ||
+        Request->VolumeRootCount > XDOWS_SECURITY_MAX_BOOT_VOLUME_ROOTS ||
+        (Request->Enabled != 0 && Request->VolumeRootCount == 0)) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    for (index = 0; index < Request->VolumeRootCount; index++) {
+        size_t length = 0;
+        UNICODE_STRING root;
+        UNICODE_STRING devicePrefix = RTL_CONSTANT_STRING(L"\\Device\\");
+        NTSTATUS status = RtlStringCchLengthW(
+            Request->VolumeRoots[index],
+            XDOWS_SECURITY_MAX_BOOT_VOLUME_ROOT_CHARS,
+            &length);
+        RtlInitUnicodeString(&root, Request->VolumeRoots[index]);
+        if (!NT_SUCCESS(status) ||
+            length < devicePrefix.Length / sizeof(WCHAR) ||
+            !RtlPrefixUnicodeString(&devicePrefix, &root, TRUE)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+    }
+
+    KeEnterCriticalRegion();
+    ExAcquirePushLockExclusive(&g_FileGuard.BootConfigurationLock);
+    RtlZeroMemory(g_FileGuard.BootVolumeRoots, sizeof(g_FileGuard.BootVolumeRoots));
+    for (index = 0; index < Request->VolumeRootCount; index++) {
+        (VOID)RtlStringCchCopyW(
+            g_FileGuard.BootVolumeRoots[index],
+            XDOWS_SECURITY_MAX_BOOT_VOLUME_ROOT_CHARS,
+            Request->VolumeRoots[index]);
+    }
+    g_FileGuard.BootDiskNumber = Request->DiskNumber;
+    g_FileGuard.BootVolumeRootCount = Request->VolumeRootCount;
+    g_FileGuard.BootProtectionEnabled = Request->Enabled != 0;
+    ExReleasePushLockExclusive(&g_FileGuard.BootConfigurationLock);
+    KeLeaveCriticalRegion();
+
+    XdowsLogWrite(
+        XdowsSecurityLogInfo,
+        0,
+        0,
+        L"BootProtect",
+        Request->Enabled != 0
+            ? L"EFI and BCD write protection enabled."
+            : L"EFI and BCD write protection disabled.");
+    return STATUS_SUCCESS;
+}
+
+BOOLEAN
+XdowsFileProtectIsBootProtectionEnabled(
+    VOID
+    )
+{
+    BOOLEAN enabled;
+
+    KeEnterCriticalRegion();
+    ExAcquirePushLockShared(&g_FileGuard.BootConfigurationLock);
+    enabled = g_FileGuard.BootProtectionEnabled;
+    ExReleasePushLockShared(&g_FileGuard.BootConfigurationLock);
+    KeLeaveCriticalRegion();
+    return enabled;
 }

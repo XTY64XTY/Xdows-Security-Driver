@@ -5,7 +5,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$SignTool,
 
-    [string]$Subject = "Xdows Security Driver Test Certificate"
+    [string]$Subject = "Xdows Security Driver Test Certificate",
+
+    [string]$DriverFileName = "Xdows-Security-Driver.sys"
 )
 
 $ErrorActionPreference = "Stop"
@@ -122,7 +124,7 @@ $certificatePath = Join-Path $PackageDirectory "Xdows-Security-Driver-Test.cer"
     $certificatePath,
     $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
 
-$driver = Join-Path $PackageDirectory "Xdows-Security-Driver.sys"
+$driver = Join-Path $PackageDirectory $DriverFileName
 $catalog = Get-ChildItem -LiteralPath $PackageDirectory -Filter "*.cat" |
     Sort-Object Name |
     Select-Object -First 1

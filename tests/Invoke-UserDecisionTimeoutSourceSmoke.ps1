@@ -21,7 +21,7 @@ function Assert-NotMatch([string]$Path, [string]$Pattern, [string]$Name) {
     if ($text -match $Pattern) { throw "$Name is still present in $Path" }
 }
 
-Assert-Match $publicHeaderPath 'XDOWS_SECURITY_PROTOCOL_VERSION\s+7u' 'protocol v7'
+Assert-Match $publicHeaderPath 'XDOWS_SECURITY_PROTOCOL_VERSION\s+8u' 'protocol v8'
 Assert-Match $publicHeaderPath 'XdowsSecurityDecisionPending\s*=\s*4' 'pending user-decision verdict'
 Assert-Match $contextHeaderPath 'XDOWS_SECURITY_USER_DECISION_TIMEOUT_MS\s+25000u' '25 second user-decision timeout'
 Assert-Match $contextSourcePath 'Decision->Decision\s*==\s*XdowsSecurityDecisionPending' 'pending verdict handling'

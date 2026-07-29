@@ -462,6 +462,32 @@ Return Value:
             input->Enabled != 0);
         break;
     }
+    case IOCTL_XDOWS_SECURITY_SET_BOOT_PROTECTION:
+    {
+        PXDOWS_SECURITY_BOOT_PROTECTION_REQUEST input;
+
+        status = XdowsRequireProtectedClient(Request, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = WdfRequestRetrieveInputBuffer(
+            Request,
+            sizeof(*input),
+            (PVOID*)&input,
+            NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+        if (input->Header.Size != sizeof(*input) ||
+            input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION) {
+            status = STATUS_REVISION_MISMATCH;
+            break;
+        }
+
+        status = XdowsFileProtectConfigureBootProtection(input);
+        break;
+    }
     case IOCTL_XDOWS_SECURITY_QUERY_PROCESSES:
     {
         PXDOWS_SECURITY_PROCESS_QUERY_REQUEST input;

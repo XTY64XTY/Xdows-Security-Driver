@@ -6,4 +6,7 @@
   <Project Path="Xdows-Security-Driver/Xdows-Security-Driver.vcxproj">
     <Deploy />
   </Project>
+  <Project Path="Xdows-Security-BootFilter/Xdows-Security-BootFilter.vcxproj">
+    <Deploy />
+  </Project>
 </Solution>

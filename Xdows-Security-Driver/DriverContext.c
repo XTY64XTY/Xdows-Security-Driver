@@ -11,6 +11,7 @@ Abstract:
 --*/
 
 #include "driver.h"
+#include "fileprotect.h"
 #include "moduleregistry.h"
 #include "selfprotect.h"
 #include "tokenauth.h"
@@ -93,7 +94,8 @@ XdowsIsCriticalEventType(
         EventType == XdowsSecurityEventProcessHandle ||
         EventType == XdowsSecurityEventThreadHandle ||
         EventType == XdowsSecurityEventImageLoad ||
-        EventType == XdowsSecurityEventBehavior;
+        EventType == XdowsSecurityEventBehavior ||
+        EventType == XdowsSecurityEventBootWrite;
 }
 
 XDOWS_DRIVER_CONTEXT g_XdowsDriverContext;
@@ -664,4 +666,6 @@ XdowsGetState(
         : 0;
     State->StartupProtectionEnabled =
         XdowsSelfProtectIsStartupProtectionEnabled() ? 1 : 0;
+    State->BootProtectionEnabled =
+        XdowsFileProtectIsBootProtectionEnabled() ? 1 : 0;
 }

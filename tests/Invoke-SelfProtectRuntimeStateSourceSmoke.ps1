@@ -19,7 +19,7 @@ function Assert-Match([string]$Path, [string]$Pattern, [string]$Name) {
     }
 }
 
-Assert-Match $files.Public 'XDOWS_SECURITY_PROTOCOL_VERSION\s+7u' 'protocol v7'
+Assert-Match $files.Public 'XDOWS_SECURITY_PROTOCOL_VERSION\s+8u' 'protocol v8'
 Assert-Match $files.Public 'ULONG\s+SelfProtectionEnabled;\s*ULONG\s+ProtectedProcessId;\s*ULONG\s+StartupProtectionEnabled;' 'self-protection runtime state fields'
 Assert-Match $files.Context 'State->SelfProtectionEnabled\s*=\s*XdowsSelfProtectIsProcessProtected\(clientProcessId\)' 'active guarded PID state query'
 Assert-Match $files.Context 'State->ProtectedProcessId\s*=\s*State->SelfProtectionEnabled\s*\?\s*HandleToULong\(clientProcessId\)\s*:\s*0' 'protected PID publication'

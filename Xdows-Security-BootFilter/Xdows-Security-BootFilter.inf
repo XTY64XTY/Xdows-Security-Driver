@@ -1,0 +1,40 @@
+[Version]
+Signature = "$WINDOWS NT$"
+Class = System
+ClassGuid = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider = %ManufacturerName%
+CatalogFile = Xdows-Security-BootFilter.cat
+DriverVer = 07/29/2026,1.0.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+XdowsBootFilter.DriverFiles = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+Xdows-Security-BootFilter.sys = 1,,
+
+[DefaultInstall.NT$ARCH$]
+OptionDesc = %XdowsBootFilter.ServiceDescription%
+CopyFiles = XdowsBootFilter.DriverFiles
+
+[XdowsBootFilter.DriverFiles]
+Xdows-Security-BootFilter.sys
+
+[DefaultInstall.NT$ARCH$.Services]
+AddService = Xdows-Security-BootFilter,,XdowsBootFilter.ServiceInstall
+
+[XdowsBootFilter.ServiceInstall]
+DisplayName = %XdowsBootFilter.ServiceDescription%
+Description = %XdowsBootFilter.ServiceDescription%
+ServiceType = 1
+StartType = 3
+ErrorControl = 1
+ServiceBinary = %13%\Xdows-Security-BootFilter.sys
+
+[Strings]
+ManufacturerName = "Xdows Software"
+DiskName = "Xdows Security Boot Filter Installation Disk"
+XdowsBootFilter.ServiceDescription = "Xdows Security Boot Storage Filter"

@@ -63,5 +63,52 @@ $signatureResults = foreach ($path in $signedFiles) {
     }
 }
 
+$bootProjectPackageDir = Join-Path $repoRoot (Join-Path "Xdows-Security-BootFilter" (Join-Path $Platform (Join-Path $Configuration "Xdows-Security-BootFilter")))
+$bootSolutionPackageDir = Join-Path $repoRoot (Join-Path $Platform (Join-Path $Configuration "Xdows-Security-BootFilter"))
+$bootPackageDir = @($bootProjectPackageDir, $bootSolutionPackageDir) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($bootPackageDir)) {
+    $bootPackageDir = $bootProjectPackageDir
+}
+
+foreach ($relative in @(
+    "Xdows-Security-BootFilter.inf",
+    "Xdows-Security-BootFilter.sys",
+    "xdows-security-bootfilter.cat"
+)) {
+    $path = Join-Path $bootPackageDir $relative
+    if (!(Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -le 0) {
+        throw "Required boot filter package file is missing or empty: $path"
+    }
+}
+
+$bootInfText = Get-Content -Raw -LiteralPath (Join-Path $bootPackageDir "Xdows-Security-BootFilter.inf")
+foreach ($pattern in @(
+    "(?i)CatalogFile\s*=\s*Xdows-Security-BootFilter\.cat",
+    "ServiceBinary\s*=\s*%(?:12|13)%\\Xdows-Security-BootFilter\.sys",
+    "ServiceType\s*=\s*1",
+    "StartType\s*=\s*3"
+)) {
+    if ($bootInfText -notmatch $pattern) {
+        throw "Boot filter INF package metadata check failed: $pattern"
+    }
+}
+
+$signatureResults += foreach ($path in @(
+    (Join-Path $bootPackageDir "Xdows-Security-BootFilter.sys"),
+    (Join-Path $bootPackageDir "xdows-security-bootfilter.cat")
+)) {
+    $signature = Get-AuthenticodeSignature -LiteralPath $path
+    if ($signature.Status -eq "NotSigned" -or $null -eq $signature.SignerCertificate) {
+        throw "Expected a VS/WDK build signature on $path, but signature status was $($signature.Status)."
+    }
+
+    [pscustomobject]@{
+        Path = $path
+        Status = $signature.Status
+        Signer = $signature.SignerCertificate.Subject
+        Thumbprint = $signature.SignerCertificate.Thumbprint
+    }
+}
+
 $signatureResults | Format-Table -AutoSize
-Write-Host "Driver package smoke passed for package: $packageDir"
+Write-Host "Driver package smoke passed for packages: $packageDir and $bootPackageDir"
