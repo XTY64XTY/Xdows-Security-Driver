@@ -20,7 +20,7 @@ function Assert-Match([string]$Path, [string]$Pattern, [string]$Name) {
     }
 }
 
-foreach ($module in @('TOKEN_AUTH', 'PROCESS', 'FILE', 'INJECTION', 'SELF_PROTECT', 'BEHAVIOR')) {
+foreach ($module in @('TOKEN_AUTH', 'PROCESS', 'FILE', 'INJECTION', 'SELF_PROTECT', 'BEHAVIOR', 'REGISTRY')) {
     Assert-Match $files.Public "XDOWS_SECURITY_MODULE_$module" "$module module bit"
 }
 

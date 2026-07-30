@@ -25,12 +25,16 @@ The model repository owns:
 
 ## Protocol Version Rules
 
-Current protocol version: `7`.
+Current protocol version: `9`.
 
-Protocol 7 adds the `Behavior` event, the shared `BehaviorType` payload,
+Protocol 7 added the `Behavior` event, the shared `BehaviorType` payload,
 per-type state counters for that event, and the required R0 behavior module
 and capability bits. Protocol 6 builds remain explicit hot-upgrade sources;
 they are not accepted as current runtime peers.
+
+Protocol 9 adds the `SetBootProtection` (0x80E) and `SetRegistryProtection`
+(0x80F) IOCTLs, the `RegistryWrite` event (type 11), the R0 registry protection
+capability bit `0x200`, and the `Registry` module bit `0x40`.
 
 Any change to `Public.h` that modifies a struct layout, enum value, IOCTL function code, string buffer length, token length, or device path requires all of the following in the same block:
 
@@ -60,6 +64,8 @@ Do not reuse old enum values for new meanings. Add new values at the end unless 
 | `IOCTL_XDOWS_SECURITY_SET_STARTUP_PROTECTION` | `0x80B` | `SetStartupProtection` | Synchronize startup-entry self-protection. |
 | `IOCTL_XDOWS_SECURITY_QUERY_PROCESSES` | `0x80C` | `QueryProcesses` | Return a token-authorized, paged kernel process snapshot. |
 | `IOCTL_XDOWS_SECURITY_OPERATE_PROCESS` | `0x80D` | `OperateProcess` | Suspend, resume, or terminate a process after protected-client and token validation. |
+| `IOCTL_XDOWS_SECURITY_SET_BOOT_PROTECTION` | `0x80E` | `SetBootProtection` | Configure EFI and BCD boot protection. |
+| `IOCTL_XDOWS_SECURITY_SET_REGISTRY_PROTECTION` | `0x80F` | `SetRegistryProtection` | Configure R0 registry protection rules. |
 
 Process management requests require both the registered, self-protected main process identity and the authorization token issued during registration. The driver rejects PID 0, PID 4, the calling main process, the protected process, and critical processes.
 

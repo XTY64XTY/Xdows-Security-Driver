@@ -63,6 +63,9 @@
     <ClInclude Include="RansomwareMonitor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="RegistryProtect.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="SelfProtect.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -105,6 +108,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="RansomwareMonitor.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="RegistryProtect.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="SelfProtect.c">

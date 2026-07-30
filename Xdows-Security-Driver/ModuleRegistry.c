@@ -15,6 +15,7 @@ Abstract:
 #include "fileprotect.h"
 #include "injectionprotect.h"
 #include "log.h"
+#include "registryprotect.h"
 #include "selfprotect.h"
 #include "tokenauth.h"
 
@@ -26,6 +27,7 @@ typedef enum _XDOWS_MODULE_INDEX {
     XdowsModuleFile,
     XdowsModuleInjection,
     XdowsModuleSelf,
+    XdowsModuleRegistry,
     XdowsModuleCount
 } XDOWS_MODULE_INDEX;
 
@@ -53,6 +55,8 @@ XdowsModuleBit(
         return XDOWS_SECURITY_MODULE_INJECTION;
     case XdowsModuleSelf:
         return XDOWS_SECURITY_MODULE_SELF_PROTECT;
+    case XdowsModuleRegistry:
+        return XDOWS_SECURITY_MODULE_REGISTRY;
     default:
         return 0;
     }
@@ -135,6 +139,7 @@ XdowsModulesInitialize(
     XdowsTryStartModule(XdowsModuleFile, L"File", XdowsFileProtectInitialize);
     XdowsTryStartModule(XdowsModuleInjection, L"Injection", XdowsInjectionProtectInitialize);
     XdowsTryStartModule(XdowsModuleSelf, L"SelfProtect", XdowsSelfProtectInitialize);
+    XdowsTryStartModule(XdowsModuleRegistry, L"RegistryProtect", XdowsRegistryProtectInitialize);
 
     return STATUS_SUCCESS;
 
@@ -148,6 +153,11 @@ XdowsModulesShutdown(
     VOID
     )
 {
+    if (g_ModuleStarted[XdowsModuleRegistry]) {
+        XdowsRegistryProtectShutdown();
+        XdowsMarkStopped(XdowsModuleRegistry);
+    }
+
     if (g_ModuleStarted[XdowsModuleSelf]) {
         XdowsSelfProtectShutdown();
         XdowsMarkStopped(XdowsModuleSelf);
