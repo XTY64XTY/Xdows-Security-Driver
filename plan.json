@@ -56,10 +56,10 @@
   "progressSummary": {
     "overallStatus": "in_progress",
     "nextRecommendedBlockId": "B23",
-    "implementedBlockCount": 23,
+    "implementedBlockCount": 24,
     "verifiedBlockCount": 2,
-    "totalBlockCount": 23,
-    "notes": "B00-B22 均已落地，其中 B00-B01 verified，B02-B22 implemented。B19 为 R0 动态行为防护，B20 为可选磁盘引导备份与在线还原，B21 为 R3 引导防护，B22 为 R0 引导防护。驱动、破坏性磁盘写入及 EFI/BCD 修复仍需在可恢复虚拟机中完成运行时验证。"
+    "totalBlockCount": 24,
+    "notes": "B00-B23 块均已落地，其中 B00-B01 verified，B02-B23 implemented。B19 为 R0 动态行为防护，B20 为可选磁盘引导备份与在线还原，B21 为 R3 引导防护，B22 为 R0 引导防护，B23 为 R0 注册表防护（协议 v9）。驱动、破坏性磁盘写入、EFI/BCD 修复及注册表回调运行时验证仍需在可恢复虚拟机中完成。"
   },
   "globalCommands": [
     {
@@ -2637,23 +2637,60 @@
       "lastUpdatedAt": "2026-07-30",
       "lastUpdatedBy": "Codex",
       "notes": "源码、协议、构建、Universal API、Inf2Cat、签名和发布资产已验证。当前会话不是提升权限的可恢复虚拟机，因此未执行真实存储附加、破坏性原始写入、EFI/BCD 变更或卸载运行时测试。"
+    },
+    {
+      "id": "B23",
+      "title": "R0 注册表防护",
+      "status": "implemented",
+      "implemented": true,
+      "ownerRepos": [
+        "Xdows-Security-Driver",
+        "Xdows-Security"
+      ],
+      "dependsOn": [
+        "B22"
+      ],
+      "deliveryConditions": [
+        "新增 R0 注册表防护模块，通过内核注册表回调拦截受保护键值的写入、创建、删除与重命名操作并交由用户态决策。",
+        "新增 RegistryProtect.c/RegistryProtect.h 实现注册表回调与规则匹配，协议版本升至 v9，构建 ID 2026073001。",
+        "Public.h 新增能力位 0x200（XDOWS_SECURITY_CAP_R0_REGISTRY_PROTECTION）、模块位 0x40（XDOWS_SECURITY_MODULE_REGISTRY）、事件类型 RegistryWrite=11 与 IOCTL 0x80F（SetRegistryProtection）。",
+        "ModuleRegistry.c、Queue.c、DriverContext.c 接入注册表模块注册、事件排队与驱动上下文启停。"
+      ],
+      "testMethods": [
+        "运行 Invoke-DriverBridgeProtocolSmoke.ps1 协议镜像测试。",
+        "运行模块健康源码冒烟。",
+        "构建 Protection.csproj 托管层验证编译。"
+      ],
+      "evidence": [
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\RegistryProtect.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\RegistryProtect.h",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Public.h（协议 v9，能力位 0x200、模块位 0x40、事件 RegistryWrite=11、IOCTL 0x80F SetRegistryProtection）",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\ModuleRegistry.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\Queue.c",
+        "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\DriverContext.c",
+        "Protection.csproj 托管层编译通过",
+        "Invoke-DriverBridgeProtocolSmoke.ps1 协议镜像测试 191 项通过",
+        "模块健康源码冒烟通过"
+      ],
+      "lastUpdatedAt": "2026-07-30",
+      "lastUpdatedBy": "GLM-5.2",
+      "notes": "R0 注册表防护已落地：新增 RegistryProtect.c/RegistryProtect.h，修改 Public.h、ModuleRegistry.c、Queue.c、DriverContext.c，协议版本升至 v9，构建 ID 2026073001，新增能力位 0x200（R0 Registry Protection）、模块位 0x40（Registry）、事件类型 RegistryWrite=11 与 IOCTL 0x80F（SetRegistryProtection）。验证：Protection.csproj 编译通过、协议镜像测试 191 项通过、模块健康源码冒烟通过。注意：驱动原生编译需要 Visual Studio MSBuild，当前环境未安装，仅托管层编译验证通过。"
     }
   ],
   "lastCheckpoint": {
     "lastUpdatedAt": "2026-07-30",
-    "lastUpdatedBy": "Codex",
-    "summary": "完成 B22：R0 引导防护。",
+    "lastUpdatedBy": "GLM-5.2",
+    "summary": "完成 B23：R0 注册表防护（协议 v9）。",
     "evidence": [
-      "D:\\Code\\Xdows-Security-Driver\\tests\\Invoke-BootFilterSourceSmoke.ps1 passed",
-      "D:\\Code\\Xdows-Security\\tests\\Invoke-R0BootProtectionSourceSmoke.ps1 passed",
-      "D:\\Code\\Xdows-Security\\tests\\Xdows-Security-BootProtectionTests runtime tests passed",
-      "Release x64 full solution build passed with 0 errors and the existing SecurityPage nullable warning only",
-      "D:\\Code\\Xdows-Security\\tests\\Invoke-PublishAssetSmoke.ps1 -Configuration Release -Platform x64 passed",
-      "Xdows-Security-Driver commit 253263d",
-      "Xdows-Security commit 011b0c5"
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\RegistryProtect.c",
+      "D:\\Code\\Xdows-Security-Driver\\Xdows-Security-Driver\\RegistryProtect.h",
+      "Protection.csproj 托管层编译通过",
+      "Invoke-DriverBridgeProtocolSmoke.ps1 协议镜像测试 191 项通过",
+      "模块健康源码冒烟通过"
     ],
     "next": [
-      "Optimize R3 registry protection and implement R0 registry protection",
+      "在可恢复虚拟机中验证 R0 注册表回调运行时行为与破坏性用例",
+      "安装 Visual Studio MSBuild 后构建驱动原生层并完成完整 Release x64 验证",
       "Run destructive R0/R3 boot protection tests in a disposable recoverable VM before public release"
     ]
   }
