@@ -289,6 +289,14 @@ Return Value:
 
         UNREFERENCED_PARAMETER(OutputBufferLength);
 
+        //
+        // State query is intentionally left ungated. The repair workflow
+        // must be able to inspect the driver's protocol/build ID and client
+        // connection state BEFORE registering as a client. Otherwise a
+        // previous-instance crash or version mismatch cannot be diagnosed.
+        // REGISTER_CLIENT already returns protocol/build/capabilities to any
+        // admin caller, so gating GET_STATE provides no incremental security.
+        //
         status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*output), (PVOID*)&output, NULL);
         if (!NT_SUCCESS(status)) {
             break;
@@ -320,14 +328,21 @@ Return Value:
         break;
     }
     case IOCTL_XDOWS_SECURITY_DISCONNECT_CLIENT:
-        status = XdowsRequireRegisteredClient(Request, NULL);
+    {
+        ULONG requestorProcessId;
+
+        status = XdowsRequireRegisteredClient(Request, &requestorProcessId);
         if (!NT_SUCCESS(status)) {
             break;
         }
         XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client disconnected.");
+        if (XdowsSelfProtectIsProcessProtected(ULongToHandle(requestorProcessId))) {
+            XdowsSelfProtectClearRegistration();
+        }
         XdowsDisconnectClient();
         status = STATUS_SUCCESS;
         break;
+    }
     case IOCTL_XDOWS_SECURITY_REGISTER_PROTECTED_PROCESS:
     {
         PXDOWS_SECURITY_PROTECTED_PROCESS_REQUEST input;
@@ -622,48 +637,44 @@ Return Value:
 
 --*/
 {
-    TraceEvents(TRACE_LEVEL_INFORMATION, 
-                TRACE_QUEUE, 
-                "%!FUNC! Queue 0x%p, Request 0x%p ActionFlags %d", 
+    UNREFERENCED_PARAMETER(Queue);
+
+    TraceEvents(TRACE_LEVEL_INFORMATION,
+                TRACE_QUEUE,
+                "%!FUNC! Queue 0x%p, Request 0x%p ActionFlags %d",
                 Queue, Request, ActionFlags);
 
     //
-    // In most cases, the EvtIoStop callback function completes, cancels, or postpones
-    // further processing of the I/O request.
+    // WDF contract: EvtIoStop MUST complete, cancel, or acknowledge every
+    // request it is invoked for. The previous empty implementation simply
+    // returned without acknowledging, which stalls the power transition and
+    // can bugcheck 0x9F (DRIVER_POWER_STATE_FAILURE) when the system enters
+    // S3/S4 with a request in flight.
     //
-    // Typically, the driver uses the following rules:
-    //
-    // - If the driver owns the I/O request, it calls WdfRequestUnmarkCancelable
-    //   (if the request is cancelable) and either calls WdfRequestStopAcknowledge
-    //   with a Requeue value of TRUE, or it calls WdfRequestComplete with a
-    //   completion status value of STATUS_SUCCESS or STATUS_CANCELLED.
-    //
-    //   Before it can call these methods safely, the driver must make sure that
-    //   its implementation of EvtIoStop has exclusive access to the request.
-    //
-    //   In order to do that, the driver must synchronize access to the request
-    //   to prevent other threads from manipulating the request concurrently.
-    //   The synchronization method you choose will depend on your driver's design.
-    //
-    //   For example, if the request is held in a shared context, the EvtIoStop callback
-    //   might acquire an internal driver lock, take the request from the shared context,
-    //   and then release the lock. At this point, the EvtIoStop callback owns the request
-    //   and can safely complete or requeue the request.
-    //
-    // - If the driver has forwarded the I/O request to an I/O target, it either calls
-    //   WdfRequestCancelSentRequest to attempt to cancel the request, or it postpones
-    //   further processing of the request and calls WdfRequestStopAcknowledge with
-    //   a Requeue value of FALSE.
-    //
-    // A driver might choose to take no action in EvtIoStop for requests that are
-    // guaranteed to complete in a small amount of time.
-    //
-    // In this case, the framework waits until the specified request is complete
-    // before moving the device (or system) to a lower power state or removing the device.
-    // Potentially, this inaction can prevent a system from entering its hibernation state
-    // or another low system power state. In extreme cases, it can cause the system
-    // to crash with bugcheck code 9F.
-    //
+    if (ActionFlags & WdfRequestStopRequestCancelable) {
+        NTSTATUS unmarkStatus = WdfRequestUnmarkCancelable(Request);
+        if (NT_SUCCESS(unmarkStatus)) {
+            //
+            // We regained exclusive ownership of a cancelable request.
+            // Complete it so the power transition is not delayed; the
+            // client re-issues its poll after resume.
+            //
+            WdfRequestComplete(Request, STATUS_CANCELLED);
+            return;
+        }
+        //
+        // STATUS_CANCELLED: the cancel callback owns the request and will
+        // complete it. Nothing further to do.
+        //
+        return;
+    }
 
-    return;
+    //
+    // Non-cancelable request: requests on this queue are completed
+    // synchronously by the dispatch routine, so any request observed here
+    // is short-lived by construction. Acknowledge the stop and keep
+    // ownership (no requeue) - the in-flight dispatch completes it
+    // momentarily and the framework can proceed.
+    //
+    WdfRequestStopAcknowledge(Request, FALSE);
 }

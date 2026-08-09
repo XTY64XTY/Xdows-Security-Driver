@@ -627,6 +627,7 @@ XdowsFilePreCreate(
     PXDOWS_BOOT_CREATE_CONTEXT bootContext = NULL;
     PFLT_FILE_NAME_INFORMATION name = NULL;
     NTSTATUS status;
+    BOOLEAN isWriteOpen;
 
     UNREFERENCED_PARAMETER(FltObjects);
     *CompletionContext = NULL;
@@ -636,49 +637,71 @@ XdowsFilePreCreate(
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    status = XdowsFileAcquireName(Data, &name);
-    if (!NT_SUCCESS(status)) {
-        return FLT_PREOP_SUCCESS_NO_CALLBACK;
-    }
+    //
+    // Determine whether this is a write-open before acquiring the file
+    // name. XdowsFileIsWriteOpen only inspects the create disposition and
+    // desired access flags, so it is safe to call before
+    // FltGetFileNameInformation.
+    //
+    isWriteOpen = XdowsFileIsWriteOpen(Data);
 
-    if (XdowsFileIsWriteOpen(Data) &&
-        XdowsFileDenyProtectedMutation(Data, &name->Name)) {
-        FltReleaseFileNameInformation(name);
-        return FLT_PREOP_COMPLETE;
-    }
+    //
+    // Acquire the file name only for write-opens. Read-only opens (such as
+    // LoadLibraryEx loading a DLL) do not need path-based protection checks.
+    //
+    // More importantly, FltGetFileNameInformation(FLT_FILE_NAME_NORMALIZED)
+    // forces the Filter Manager to internally open the parent directory to
+    // resolve the normalized name. When the requesting thread carries a
+    // degraded impersonation token (SecurityIdentification or lower), that
+    // internal open fails with STATUS_BAD_IMPERSONATION_LEVEL (0xC00000A5),
+    // which propagates to the original IRP and surfaces as Win32 error
+    // 1346 (ERROR_BAD_IMPERSONATION_LEVEL: required impersonation level was
+    // not provided, or the provided impersonation level is invalid). Skipping name
+    // acquisition for read opens eliminates this code path entirely.
+    //
+    if (isWriteOpen) {
+        status = XdowsFileAcquireName(Data, &name);
+        if (!NT_SUCCESS(status)) {
+            return FLT_PREOP_SUCCESS_NO_CALLBACK;
+        }
 
-    if (XdowsFileIsWriteOpen(Data) &&
-        XdowsFileIsProtectedBootPath(&name->Name)) {
-        if (XdowsFileBootMutationMustBeBlocked(Data, &name->Name)) {
+        if (XdowsFileDenyProtectedMutation(Data, &name->Name)) {
             FltReleaseFileNameInformation(name);
             return FLT_PREOP_COMPLETE;
         }
 
-        bootContext = (PXDOWS_BOOT_CREATE_CONTEXT)ExAllocatePool2(
-            POOL_FLAG_NON_PAGED,
-            sizeof(*bootContext),
-            'oBsX');
-        if (bootContext == NULL) {
-            Data->IoStatus.Status = STATUS_INSUFFICIENT_RESOURCES;
-            Data->IoStatus.Information = 0;
-            FltReleaseFileNameInformation(name);
-            return FLT_PREOP_COMPLETE;
-        }
-        RtlZeroMemory(bootContext, sizeof(*bootContext));
-        bootContext->OriginatorPid =
-            HandleToULong(FltGetRequestorProcessIdEx(Data));
-        XdowsFileCopyNameInto(
-            bootContext->Path,
-            RTL_NUMBER_OF(bootContext->Path),
-            &name->Name);
-        *CompletionContext = bootContext;
-        FltReleaseFileNameInformation(name);
-        return FLT_PREOP_SUCCESS_WITH_CALLBACK;
-    }
+        if (XdowsFileIsProtectedBootPath(&name->Name)) {
+            if (XdowsFileBootMutationMustBeBlocked(Data, &name->Name)) {
+                FltReleaseFileNameInformation(name);
+                return FLT_PREOP_COMPLETE;
+            }
 
-    if (!XdowsFileIsScannablePath(&name->Name)) {
-        FltReleaseFileNameInformation(name);
-        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+            bootContext = (PXDOWS_BOOT_CREATE_CONTEXT)ExAllocatePool2(
+                POOL_FLAG_NON_PAGED,
+                sizeof(*bootContext),
+                'oBsX');
+            if (bootContext == NULL) {
+                Data->IoStatus.Status = STATUS_INSUFFICIENT_RESOURCES;
+                Data->IoStatus.Information = 0;
+                FltReleaseFileNameInformation(name);
+                return FLT_PREOP_COMPLETE;
+            }
+            RtlZeroMemory(bootContext, sizeof(*bootContext));
+            bootContext->OriginatorPid =
+                HandleToULong(FltGetRequestorProcessIdEx(Data));
+            XdowsFileCopyNameInto(
+                bootContext->Path,
+                RTL_NUMBER_OF(bootContext->Path),
+                &name->Name);
+            *CompletionContext = bootContext;
+            FltReleaseFileNameInformation(name);
+            return FLT_PREOP_SUCCESS_WITH_CALLBACK;
+        }
+
+        if (!XdowsFileIsScannablePath(&name->Name)) {
+            FltReleaseFileNameInformation(name);
+            return FLT_PREOP_SUCCESS_NO_CALLBACK;
+        }
     }
 
     //
@@ -693,13 +716,15 @@ XdowsFilePreCreate(
     // For read-opens: do not increment the counter (a file manager
     // thumbnailing a folder can open dozens of documents read-only), but
     // still check IsFlagged so an already-flagged ransomware process is
-    // blocked from reading further files to encrypt.
+    // blocked from reading further files. This check uses only the
+    // originator PID and does not require file name acquisition, avoiding
+    // the impersonation level issue described above.
     //
     {
         ULONG originatorPid = HandleToULong(FltGetRequestorProcessIdEx(Data));
         BOOLEAN ransomBlock = FALSE;
 
-        if (XdowsFileIsWriteOpen(Data)) {
+        if (isWriteOpen && name != NULL) {
             ransomBlock = XdowsRansomwareMonitorRecordWrite(
                 originatorPid, &name->Name);
         }
@@ -723,14 +748,18 @@ XdowsFilePreCreate(
             //
             Data->IoStatus.Status = STATUS_VIRUS_INFECTED;
             Data->IoStatus.Information = 0;
-            FltReleaseFileNameInformation(name);
+            if (name != NULL) {
+                FltReleaseFileNameInformation(name);
+            }
             return FLT_PREOP_COMPLETE;
         }
     }
 
     // Opens are never sent to user mode. IRP_MJ_WRITE marks the stream-handle
     // dirty only when a real write reaches the minifilter.
-    FltReleaseFileNameInformation(name);
+    if (name != NULL) {
+        FltReleaseFileNameInformation(name);
+    }
     return FLT_PREOP_SUCCESS_NO_CALLBACK;
 }
 

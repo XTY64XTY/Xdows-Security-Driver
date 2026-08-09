@@ -487,7 +487,8 @@ XdowsQueueEventAndWait(
     if (Event->CorrelationId == 0) {
         Event->CorrelationId = Event->EventId;
     }
-    if (Event->KernelWaitTimeoutMs == 0) {
+    if (Event->KernelWaitTimeoutMs == 0 ||
+        Event->KernelWaitTimeoutMs > XDOWS_SECURITY_MAX_KERNEL_WAIT_TIMEOUT_MS) {
         Event->KernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
     }
 

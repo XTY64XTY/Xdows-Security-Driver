@@ -19,6 +19,13 @@ EXTERN_C_START
 #define XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS 5000u
 #define XDOWS_FILE_CREATE_KERNEL_WAIT_TIMEOUT_MS 1000u
 #define XDOWS_SECURITY_USER_DECISION_TIMEOUT_MS 25000u
+//
+// Upper bound for user-mode-supplied kernel wait timeouts. Must stay above
+// XDOWS_SECURITY_USER_DECISION_TIMEOUT_MS (25 s) so interactive prompts are
+// never clamped, but small enough that a malicious or malformed request
+// cannot pin a kernel thread for days.
+//
+#define XDOWS_SECURITY_MAX_KERNEL_WAIT_TIMEOUT_MS 30000u
 #define XDOWS_SECURITY_MAX_PENDING_EVENTS 128
 
 typedef struct _XDOWS_PENDING_EVENT {
