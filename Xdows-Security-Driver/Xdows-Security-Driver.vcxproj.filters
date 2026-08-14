@@ -30,6 +30,9 @@
     <ClInclude Include="BehaviorRules.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CodeIntegrity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Device.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -78,6 +81,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BehaviorRules.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CodeIntegrity.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Device.c">

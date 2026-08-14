@@ -23,6 +23,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BehaviorRules.c" />
+    <ClCompile Include="CodeIntegrity.c" />
     <ClCompile Include="Device.c" />
     <ClCompile Include="DriverContext.c" />
     <ClCompile Include="Driver.c" />
@@ -40,6 +41,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BehaviorRules.h" />
+    <ClInclude Include="CodeIntegrity.h" />
     <ClInclude Include="Device.h" />
     <ClInclude Include="DriverContext.h" />
     <ClInclude Include="Driver.h" />

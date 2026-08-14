@@ -32,6 +32,7 @@ Environment:
 
 #include "driver.h"
 #include "BehaviorRules.h"
+#include "CodeIntegrity.h"
 #include <ntstrsafe.h>
 
 //
@@ -430,6 +431,8 @@ XdowsInjectionPreOperation(
     ULONG sourcePid;
     ULONGLONG eventId = 0;
     ULONGLONG correlationId = 0;
+    BOOLEAN signatureKnown;
+    BOOLEAN sourceTrusted = FALSE;
 
     UNREFERENCED_PARAMETER(RegistrationContext);
 
@@ -465,6 +468,19 @@ XdowsInjectionPreOperation(
     }
 
     sourcePid = HandleToULong(callerProcessId);
+
+    //
+    // ci.dll validation is performed asynchronously outside this Ob callback
+    // because normal kernel APCs are disabled here. A trusted cached signer
+    // verdict suppresses the noisy user-mode path; unknown and unsigned
+    // sources continue through the existing policy unchanged.
+    //
+    signatureKnown = XdowsCodeIntegrityQueryProcessTrust(
+        PsGetCurrentProcess(),
+        &sourceTrusted);
+    if (signatureKnown && sourceTrusted) {
+        return OB_PREOP_SUCCESS;
+    }
 
     //
     // Cache hit: skip user-mode consultation for repeated allow requests.
@@ -518,6 +534,12 @@ XdowsInjectionProtectInitialize(
     RtlZeroMemory(&g_Injection, sizeof(g_Injection));
     ExInitializePushLock(&g_Injection.Lock);
 
+    // CI is an optional false-positive reduction layer. Its initializer
+    // intentionally returns success when private exports are unavailable so
+    // process/thread injection protection remains active on unsupported OS
+    // builds and falls back to the established user-mode policy.
+    (VOID)XdowsCodeIntegrityInitialize();
+
     RtlZeroMemory(operations, sizeof(operations));
     operations[0].ObjectType = PsProcessType;
     operations[0].Operations = OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
@@ -537,6 +559,7 @@ XdowsInjectionProtectInitialize(
     status = ObRegisterCallbacks(&registration, &g_Injection.CallbackHandle);
     if (!NT_SUCCESS(status)) {
         g_Injection.CallbackHandle = NULL;
+        XdowsCodeIntegrityShutdown();
         XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"Injection",
             L"Object callback registration failed", status);
         return status;
@@ -566,6 +589,7 @@ XdowsInjectionProtectShutdown(
     }
 
     RtlZeroMemory(g_Injection.Verdicts, sizeof(g_Injection.Verdicts));
+    XdowsCodeIntegrityShutdown();
 
     XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Injection",
         L"Injection protection callbacks unregistered.");

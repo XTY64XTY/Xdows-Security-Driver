@@ -137,8 +137,7 @@ XdowsModulesInitialize(
     XdowsTryStartModule(XdowsModuleBehavior, L"Behavior", XdowsBehaviorProtectInitialize);
     XdowsTryStartModule(XdowsModuleProcess, L"Process", XdowsProcessProtectInitialize);
     XdowsTryStartModule(XdowsModuleFile, L"File", XdowsFileProtectInitialize);
-    // Injection protection temporarily disabled (process/thread injection).
-    // XdowsTryStartModule(XdowsModuleInjection, L"Injection", XdowsInjectionProtectInitialize);
+    XdowsTryStartModule(XdowsModuleInjection, L"Injection", XdowsInjectionProtectInitialize);
     XdowsTryStartModule(XdowsModuleSelf, L"SelfProtect", XdowsSelfProtectInitialize);
     XdowsTryStartModule(XdowsModuleRegistry, L"RegistryProtect", XdowsRegistryProtectInitialize);
 
