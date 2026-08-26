@@ -19,6 +19,7 @@ Environment:
 --*/
 
 #include "driver.h"
+#include "codeintegrity.h"
 #include "registryprotect.h"
 #include "selfprotect.h"
 #include <ntstrsafe.h>
@@ -242,12 +243,27 @@ XdowsRegistryDecideMutation(
     XDOWS_SECURITY_EVENT event;
     XDOWS_SECURITY_DECISION decision;
     ULONG processId = HandleToULong(PsGetCurrentProcessId());
+    BOOLEAN signatureKnown;
+    BOOLEAN sourceTrusted = FALSE;
     NTSTATUS status;
 
     if (!XdowsRegistryPathMatchesRules(Path, IncludeAncestor)) {
         return STATUS_SUCCESS;
     }
-    if (processId != 0 && XdowsIsRegisteredClientProcess(processId)) {
+    // Registry callbacks can originate from the kernel/System process. Kernel
+    // code is outside this user-mode persistence threat model, and blocking
+    // PID 4 breaks ordinary Windows servicing and policy application.
+    if (processId <= 4 || XdowsIsRegisteredClientProcess(processId)) {
+        return STATUS_SUCCESS;
+    }
+
+    // The injection module owns the asynchronous CI cache and starts before
+    // RegistryProtect. Reuse its PID+creation-time verdict so catalog-signed
+    // Windows components never enter the synchronous user-mode decision path.
+    signatureKnown = XdowsCodeIntegrityQueryProcessTrust(
+        PsGetCurrentProcess(),
+        &sourceTrusted);
+    if (signatureKnown && sourceTrusted) {
         return STATUS_SUCCESS;
     }
 
@@ -258,8 +274,7 @@ XdowsRegistryDecideMutation(
     event.EventId = XdowsAllocateEventId();
     event.CorrelationId = event.EventId;
     event.EventType = XdowsSecurityEventRegistryWrite;
-    event.Flags = XdowsSecurityEventFlagUserModeRequired |
-        XdowsSecurityEventFlagThreatConfirmed;
+    event.Flags = XdowsSecurityEventFlagUserModeRequired;
     event.ProcessId = processId;
     event.CreatingProcessId = processId;
     event.CreatingThreadId = HandleToULong(PsGetCurrentThreadId());
@@ -280,8 +295,19 @@ XdowsRegistryDecideMutation(
     status = KeGetCurrentIrql() == PASSIVE_LEVEL
         ? XdowsQueueEventAndWait(&event, &decision)
         : STATUS_INVALID_DEVICE_STATE;
-    if (NT_SUCCESS(status) &&
-        decision.Decision == XdowsSecurityDecisionAllow) {
+    if (!NT_SUCCESS(status) ||
+        decision.Decision == XdowsSecurityDecisionTimeout) {
+        XdowsLogWriteStatus(
+            XdowsSecurityLogWarning,
+            event.EventId,
+            event.CorrelationId,
+            L"RegistryProtect",
+            L"Registry decision infrastructure unavailable; mutation allowed",
+            status);
+        return STATUS_SUCCESS;
+    }
+
+    if (decision.Decision != XdowsSecurityDecisionBlock) {
         return STATUS_SUCCESS;
     }
 

@@ -21,6 +21,18 @@ Abstract:
     to a system worker; the injection hot path only performs a bounded cache
     lookup keyed by PID and process creation time.
 
+    The driver starts on demand (SERVICE_DEMAND_START), so the image file of
+    nearly every running process already existed before this module loaded
+    and will never be seen by the create-notify callback. An initial sweep
+    therefore enumerates existing processes through
+    ZwQuerySystemInformation(SystemProcessInformation) and resolves each PID
+    with PsLookupProcessByProcessId. PsGetNextProcess must NOT be used here:
+    despite being declared in the WDK headers, it is not present in the
+    ntoskrnl export table on current Windows builds, so resolving it through
+    MmGetSystemRoutineAddress always fails and the sweep silently degrades
+    into a no-op - which left every pre-existing process without a cached
+    verdict and defeated the whole fast-allow path.
+
 Environment:
 
     Kernel-mode Driver Framework
@@ -30,14 +42,21 @@ Environment:
 #include "driver.h"
 #include "codeintegrity.h"
 #include <ntimage.h>
+#include <bcrypt.h>
+#include <ntstrsafe.h>
 
 #define XDOWS_SYSTEM_MODULE_INFORMATION_CLASS 11u
+#define XDOWS_SYSTEM_PROCESS_INFORMATION_CLASS 5u
 #define XDOWS_CI_MODULE_NAME "ci.dll"
 #define XDOWS_CI_POOL_TAG 'iCsX'
 #define XDOWS_CI_POLICY_ACCEPT_ANY_ROOT_CERTIFICATE 0x00000020u
 #define XDOWS_CI_THUMBPRINT_BYTES 64u
 #define XDOWS_CI_CACHE_SLOTS 512u
 #define XDOWS_CI_MAX_QUEUED_WORK 64
+#define XDOWS_CI_CALG_SHA256 0x800Cu
+#define XDOWS_CI_DIGEST_BYTES 32u
+#define XDOWS_CI_HEADER_BUFFER_BYTES (16u * 1024u)
+#define XDOWS_CI_READ_CHUNK_BYTES (64u * 1024u)
 
 typedef NTSTATUS (NTAPI *XDOWS_ZW_QUERY_SYSTEM_INFORMATION)(
     _In_ ULONG SystemInformationClass,
@@ -46,8 +65,9 @@ typedef NTSTATUS (NTAPI *XDOWS_ZW_QUERY_SYSTEM_INFORMATION)(
     _Out_opt_ PULONG ReturnLength
     );
 
-typedef PEPROCESS (NTAPI *XDOWS_PS_GET_NEXT_PROCESS)(
-    _In_opt_ PEPROCESS Process
+typedef NTSTATUS (NTAPI *XDOWS_PS_LOOKUP_PROCESS_BY_ID)(
+    _In_ HANDLE ProcessId,
+    _Outptr_ PEPROCESS* Process
     );
 
 typedef NTSTATUS (NTAPI *XDOWS_PS_REFERENCE_PROCESS_FILE_POINTER)(
@@ -81,6 +101,47 @@ typedef VOID (NTAPI *XDOWS_CI_FREE_POLICY_INFO)(
     _Inout_ PXDOWS_MINCRYPT_POLICY_INFO PolicyInfo
     );
 
+//
+// CiVerifyHashInCatalog, modern prototype (build 6.1.7601.18519 and later,
+// i.e. every Windows 10/11). Takes an Authenticode file digest and reports
+// whether it is covered by a verified OS catalog. All output structures are
+// optional; passing NULL avoids the matching release obligation.
+//
+typedef NTSTATUS (NTAPI *XDOWS_CI_VERIFY_HASH_IN_CATALOG)(
+    _In_reads_bytes_(HashSize) PUCHAR Hash,
+    _In_ ULONG HashSize,
+    _In_ USHORT AlgorithmId,
+    _In_ ULONG ReloadCatalogs,
+    _In_ ULONG SecureProcess,
+    _In_ ULONG AcceptRoots,
+    _Inout_opt_ PXDOWS_MINCRYPT_POLICY_INFO PolicyInfo,
+    _Out_opt_ PUNICODE_STRING CatalogName,
+    _Out_opt_ PLARGE_INTEGER SigningTime,
+    _Inout_opt_ PXDOWS_MINCRYPT_POLICY_INFO TimeStampPolicyInfo
+    );
+
+//
+// Declared in ntifs.h only; forward-declared here like PsGetThreadProcess
+// in InjectionProtect.c. Returns the cached \Device\... image path of a
+// process without file-system access.
+//
+NTKERNELAPI
+NTSTATUS
+SeLocateProcessImageName(
+    _In_ PEPROCESS Process,
+    _Outptr_ PUNICODE_STRING* pImageFileName
+    );
+
+//
+// Also declared in ntifs.h only. Returns the truncated (15-char) image
+// file name cached in the EPROCESS; used solely for diagnostic logging.
+//
+NTKERNELAPI
+PCHAR
+PsGetProcessImageFileName(
+    _In_ PEPROCESS Process
+    );
+
 typedef struct _XDOWS_CI_VERDICT_SLOT {
     ULONG ProcessId;
     ULONGLONG CreateTime;
@@ -102,13 +163,19 @@ typedef struct _XDOWS_CI_CONTEXT {
     EX_RUNDOWN_REF WorkRundown;
     XDOWS_CI_VERDICT_SLOT Verdicts[XDOWS_CI_CACHE_SLOTS];
     XDOWS_ZW_QUERY_SYSTEM_INFORMATION QuerySystemInformation;
-    XDOWS_PS_GET_NEXT_PROCESS GetNextProcess;
+    XDOWS_PS_LOOKUP_PROCESS_BY_ID LookupProcessById;
     XDOWS_PS_REFERENCE_PROCESS_FILE_POINTER ReferenceProcessFilePointer;
     XDOWS_CI_VALIDATE_FILE_OBJECT ValidateFileObject;
     XDOWS_CI_FREE_POLICY_INFO FreePolicyInfo;
+    XDOWS_CI_VERIFY_HASH_IN_CATALOG VerifyHashInCatalog;
     ULONGLONG CacheSequence;
     volatile LONG AcceptingWork;
     volatile LONG QueuedWork;
+    ULONG SweepTotal;
+    ULONG SweepEmbeddedTrusted;
+    ULONG SweepCatalogTrusted;
+    ULONG SweepUntrusted;
+    ULONG SweepErrors;
     BOOLEAN NotifyRegistered;
     BOOLEAN Initialized;
 } XDOWS_CI_CONTEXT, *PXDOWS_CI_CONTEXT;
@@ -130,6 +197,27 @@ typedef struct _XDOWS_RTL_PROCESS_MODULES {
     ULONG NumberOfModules;
     XDOWS_RTL_PROCESS_MODULE_INFORMATION Modules[1];
 } XDOWS_RTL_PROCESS_MODULES;
+
+//
+// Leading portion of SYSTEM_PROCESS_INFORMATION (x64). The layout of these
+// fields is stable from Vista through Windows 11; only the fields needed to
+// walk the list and read UniqueProcessId are mirrored here. UniqueProcessId
+// sits at offset 0x50 on both x64 and ARM64.
+//
+typedef struct _XDOWS_CI_SYSTEM_PROCESS_INFORMATION {
+    ULONG NextEntryOffset;
+    ULONG NumberOfThreads;
+    LARGE_INTEGER WorkingSetPrivateSize;
+    ULONG HardFaultCount;
+    ULONG NumberOfThreadsHighWatermark;
+    ULONGLONG CycleTime;
+    LARGE_INTEGER CreateTime;
+    LARGE_INTEGER UserTime;
+    LARGE_INTEGER KernelTime;
+    UNICODE_STRING ImageName;
+    KPRIORITY BasePriority;
+    HANDLE UniqueProcessId;
+} XDOWS_CI_SYSTEM_PROCESS_INFORMATION, *PXDOWS_CI_SYSTEM_PROCESS_INFORMATION;
 
 static XDOWS_CI_CONTEXT g_CodeIntegrity;
 
@@ -478,6 +566,416 @@ XdowsCiValidateFileObject(
     return NT_SUCCESS(status) ? STATUS_SUCCESS : status;
 }
 
+//
+// Hash one [Start, End) byte range of an open synchronous file handle into
+// the CNG hash object.
+//
+static
+NTSTATUS
+XdowsCiHashFileRange(
+    _In_ BCRYPT_HASH_HANDLE Hash,
+    _In_ HANDLE File,
+    _In_ ULONGLONG Start,
+    _In_ ULONGLONG End
+    )
+{
+    PUCHAR chunk;
+    ULONGLONG position = Start;
+    NTSTATUS status = STATUS_SUCCESS;
+
+    if (End <= Start) {
+        return STATUS_SUCCESS;
+    }
+
+    chunk = ExAllocatePool2(
+        POOL_FLAG_PAGED, XDOWS_CI_READ_CHUNK_BYTES, XDOWS_CI_POOL_TAG);
+    if (chunk == NULL) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    while (position < End) {
+        IO_STATUS_BLOCK ioStatus;
+        LARGE_INTEGER byteOffset;
+        ULONG toRead;
+
+        if (End - position > XDOWS_CI_READ_CHUNK_BYTES) {
+            toRead = XDOWS_CI_READ_CHUNK_BYTES;
+        } else {
+            toRead = (ULONG)(End - position);
+        }
+
+        byteOffset.QuadPart = (LONGLONG)position;
+        status = ZwReadFile(
+            File, NULL, NULL, NULL, &ioStatus,
+            chunk, toRead, &byteOffset, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+        if (ioStatus.Information == 0) {
+            status = STATUS_END_OF_FILE;
+            break;
+        }
+
+        status = BCryptHashData(Hash, chunk, (ULONG)ioStatus.Information, 0);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+        position += ioStatus.Information;
+    }
+
+    ExFreePoolWithTag(chunk, XDOWS_CI_POOL_TAG);
+    return status;
+}
+
+//
+// Compute the Authenticode SHA-256 digest of the file behind an open handle.
+// Authenticode excludes the PE CheckSum field and the Certificate Table
+// (whose file offset and size live in DataDirectory[4]) from the hashed
+// byte stream; everything else is hashed in order.
+//
+static
+NTSTATUS
+XdowsCiComputeAuthenticodeDigest(
+    _In_ HANDLE File,
+    _In_ ULONGLONG FileSize,
+    _Out_writes_bytes_(XDOWS_CI_DIGEST_BYTES) PUCHAR Digest
+    )
+{
+    BCRYPT_ALG_HANDLE algorithm = NULL;
+    BCRYPT_HASH_HANDLE hash = NULL;
+    PUCHAR objectBuffer = NULL;
+    PUCHAR header = NULL;
+    ULONG objectLength = 0;
+    ULONG resultLength = 0;
+    ULONGLONG checksumOffset;
+    ULONGLONG securityDirectoryOffset;
+    ULONGLONG certificateOffset;
+    ULONGLONG certificateSize;
+    ULONG certificateRva;
+    ULONG optionalOffset;
+    ULONG dataDirectoryOffset;
+    USHORT magic;
+    LONGLONG e_lfanew;
+    NTSTATUS status;
+
+    header = ExAllocatePool2(
+        POOL_FLAG_PAGED, XDOWS_CI_HEADER_BUFFER_BYTES, XDOWS_CI_POOL_TAG);
+    if (header == NULL) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    //
+    // Read and validate enough of the PE header to locate the CheckSum field
+    // and the Security directory entry.
+    //
+    {
+        IO_STATUS_BLOCK ioStatus;
+        LARGE_INTEGER byteOffset = { 0 };
+        ULONG headerBytes =
+            FileSize < XDOWS_CI_HEADER_BUFFER_BYTES
+                ? (ULONG)FileSize
+                : XDOWS_CI_HEADER_BUFFER_BYTES;
+
+        status = ZwReadFile(
+            File, NULL, NULL, NULL, &ioStatus,
+            header, headerBytes, &byteOffset, NULL);
+        if (!NT_SUCCESS(status) || ioStatus.Information < 0x40) {
+            status = STATUS_INVALID_IMAGE_NOT_MZ;
+            goto Exit;
+        }
+
+        if (header[0] != 'M' || header[1] != 'Z') {
+            status = STATUS_INVALID_IMAGE_NOT_MZ;
+            goto Exit;
+        }
+
+        e_lfanew = (LONGLONG)*(UNALIGNED ULONG*)(header + 0x3C);
+        if (e_lfanew < 0 ||
+            e_lfanew + 24 + 96 > (LONGLONG)ioStatus.Information ||
+            *(UNALIGNED ULONG*)(header + e_lfanew) != 0x00004550) { // "PE\0\0"
+            status = STATUS_INVALID_IMAGE_PROTECT;
+            goto Exit;
+        }
+
+        optionalOffset = (ULONG)e_lfanew + 24;
+        magic = *(UNALIGNED USHORT*)(header + optionalOffset);
+        if (magic == 0x20B) {          // PE32+
+            dataDirectoryOffset = optionalOffset + 112;
+        } else if (magic == 0x10B) {   // PE32
+            dataDirectoryOffset = optionalOffset + 96;
+        } else {
+            status = STATUS_INVALID_IMAGE_PROTECT;
+            goto Exit;
+        }
+
+        if (dataDirectoryOffset + 5 * 8 > (ULONG)ioStatus.Information) {
+            status = STATUS_INVALID_IMAGE_PROTECT;
+            goto Exit;
+        }
+
+        checksumOffset = optionalOffset + 64;
+        securityDirectoryOffset = dataDirectoryOffset + 4 * 8;
+        certificateRva = *(UNALIGNED ULONG*)(
+            header + securityDirectoryOffset);
+        certificateSize = *(UNALIGNED ULONG*)(
+            header + securityDirectoryOffset + 4);
+    }
+
+    // The Certificate Table VirtualAddress is a file offset by definition;
+    // reject entries that do not fit the file to stay defensive.
+    if (certificateSize == 0 ||
+        certificateRva >= FileSize ||
+        certificateSize > FileSize ||
+        certificateRva + certificateSize > FileSize) {
+        certificateOffset = FileSize;
+        certificateSize = 0;
+    } else {
+        certificateOffset = certificateRva;
+    }
+
+    //
+    // Create the SHA-256 hash object. The object buffer is queried and
+    // allocated explicitly so no CNG internal allocation contract is assumed.
+    //
+    status = BCryptOpenAlgorithmProvider(
+        &algorithm, BCRYPT_SHA256_ALGORITHM, NULL, 0);
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
+    status = BCryptGetProperty(
+        algorithm,
+        BCRYPT_OBJECT_LENGTH,
+        (PUCHAR)&objectLength,
+        sizeof(objectLength),
+        &resultLength,
+        0);
+    if (!NT_SUCCESS(status) || objectLength == 0) {
+        goto Exit;
+    }
+
+    objectBuffer = ExAllocatePool2(
+        POOL_FLAG_NON_PAGED, objectLength, XDOWS_CI_POOL_TAG);
+    if (objectBuffer == NULL) {
+        status = STATUS_INSUFFICIENT_RESOURCES;
+        goto Exit;
+    }
+
+    status = BCryptCreateHash(
+        algorithm, &hash, objectBuffer, objectLength, NULL, 0, 0);
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
+    //
+    // Hash in Authenticode order: skip CheckSum (4 bytes), skip the Security
+    // data-directory entry itself (8 bytes), then skip the Certificate Table.
+    // Including that directory entry produces a different digest from the one
+    // stored in Windows catalogs, which made every catalog-signed system image
+    // look untrusted even though CiVerifyHashInCatalog was available.
+    //
+    status = XdowsCiHashFileRange(hash, File, 0, checksumOffset);
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
+    status = XdowsCiHashFileRange(
+        hash, File, checksumOffset + 4, securityDirectoryOffset);
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
+    status = XdowsCiHashFileRange(
+        hash,
+        File,
+        securityDirectoryOffset + 8,
+        certificateSize != 0 ? certificateOffset : FileSize);
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
+    if (certificateSize != 0) {
+        status = XdowsCiHashFileRange(
+            hash, File, certificateOffset + certificateSize, FileSize);
+    }
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
+    status = BCryptFinishHash(hash, Digest, XDOWS_CI_DIGEST_BYTES, 0);
+
+Exit:
+    if (hash != NULL) {
+        BCryptDestroyHash(hash);
+    }
+    if (objectBuffer != NULL) {
+        ExFreePoolWithTag(objectBuffer, XDOWS_CI_POOL_TAG);
+    }
+    if (algorithm != NULL) {
+        BCryptCloseAlgorithmProvider(algorithm, 0);
+    }
+    if (header != NULL) {
+        ExFreePoolWithTag(header, XDOWS_CI_POOL_TAG);
+    }
+    return status;
+}
+
+//
+// Catalog-signature fallback: opens the process image by its cached
+// \Device\... path, computes the Authenticode SHA-256 digest, and asks
+// ci.dll whether the digest is covered by a verified OS catalog. Covers
+// svchost.exe / services.exe / csrss.exe style binaries that carry no
+// embedded signer certificate.
+//
+static
+NTSTATUS
+XdowsCiVerifyProcessCatalog(
+    _In_ PEPROCESS Process,
+    _Out_ PBOOLEAN Trusted
+    )
+{
+    PUNICODE_STRING imagePath = NULL;
+    OBJECT_ATTRIBUTES objectAttributes;
+    IO_STATUS_BLOCK ioStatus;
+    FILE_STANDARD_INFORMATION standardInfo;
+    HANDLE file = NULL;
+    UCHAR digest[XDOWS_CI_DIGEST_BYTES];
+    NTSTATUS status;
+
+    *Trusted = FALSE;
+    if (g_CodeIntegrity.VerifyHashInCatalog == NULL) {
+        return STATUS_NOT_SUPPORTED;
+    }
+    if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    status = SeLocateProcessImageName(Process, &imagePath);
+    if (!NT_SUCCESS(status) || imagePath == NULL ||
+        imagePath->Buffer == NULL || imagePath->Length == 0) {
+        if (imagePath != NULL) {
+            ExFreePool(imagePath);
+        }
+        return status != STATUS_SUCCESS ? status : STATUS_NOT_FOUND;
+    }
+
+    InitializeObjectAttributes(
+        &objectAttributes,
+        imagePath,
+        OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
+        NULL,
+        NULL);
+
+    status = ZwCreateFile(
+        &file,
+        FILE_READ_DATA | SYNCHRONIZE,
+        &objectAttributes,
+        &ioStatus,
+        NULL,
+        FILE_ATTRIBUTE_NORMAL,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        FILE_OPEN,
+        FILE_SYNCHRONOUS_IO_NONALERT | FILE_COMPLETE_IF_OPLOCKED,
+        NULL,
+        0);
+    ExFreePool(imagePath);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = ZwQueryInformationFile(
+        file,
+        &ioStatus,
+        &standardInfo,
+        sizeof(standardInfo),
+        FileStandardInformation);
+    if (!NT_SUCCESS(status) || standardInfo.EndOfFile.QuadPart <= 0) {
+        ZwClose(file);
+        return NT_SUCCESS(status) ? STATUS_INVALID_FILE_FOR_SECTION : status;
+    }
+
+    status = XdowsCiComputeAuthenticodeDigest(
+        file, (ULONGLONG)standardInfo.EndOfFile.QuadPart, digest);
+    ZwClose(file);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    //
+    // Default catalog policy (ReloadCatalogs=0, SecureProcess=0,
+    // AcceptRoots=0): the digest must be present in an already-loaded
+    // catalog signed by a standard root. NT_SUCCESS means catalog-covered.
+    //
+    status = g_CodeIntegrity.VerifyHashInCatalog(
+        digest,
+        XDOWS_CI_DIGEST_BYTES,
+        (USHORT)XDOWS_CI_CALG_SHA256,
+        0,
+        0,
+        0,
+        NULL,
+        NULL,
+        NULL,
+        NULL);
+    if (NT_SUCCESS(status)) {
+        *Trusted = TRUE;
+        return STATUS_SUCCESS;
+    }
+    return STATUS_SUCCESS; // completed negative verification
+}
+
+//
+// Shared catalog fallback. When the embedded-signature verdict is missing
+// or negative, retry through the OS catalog (CiVerifyHashInCatalog). An
+// ABI/runtime failure of the fallback keeps the embedded result so an
+// incompatible ci.dll cannot widen trust.
+//
+// Process may be NULL; the process is then looked up by ProcessId and
+// released here (runtime create-notify work items only keep the id).
+//
+static
+VOID
+XdowsCiApplyCatalogFallback(
+    _In_opt_ PEPROCESS Process,
+    _In_ HANDLE ProcessId,
+    _Inout_ PNTSTATUS Status,
+    _Inout_ PBOOLEAN Trusted,
+    _Out_opt_ PBOOLEAN CatalogApplied
+    )
+{
+    PEPROCESS process = Process;
+    BOOLEAN catalogTrusted = FALSE;
+    NTSTATUS catalogStatus;
+
+    if (CatalogApplied != NULL) {
+        *CatalogApplied = FALSE;
+    }
+
+    if (NT_SUCCESS(*Status) && *Trusted) {
+        return; // embedded verdict already positive
+    }
+
+    if (process == NULL) {
+        if (!NT_SUCCESS(g_CodeIntegrity.LookupProcessById(
+                ProcessId, &process))) {
+            return;
+        }
+    }
+
+    catalogStatus = XdowsCiVerifyProcessCatalog(process, &catalogTrusted);
+    if (Process == NULL) {
+        ObDereferenceObject(process);
+    }
+
+    if (NT_SUCCESS(catalogStatus)) {
+        *Status = STATUS_SUCCESS;
+        *Trusted = catalogTrusted;
+        if (CatalogApplied != NULL) {
+            *CatalogApplied = TRUE;
+        }
+    }
+}
+
 static
 VOID
 XdowsCiValidateAndCache(
@@ -485,21 +983,160 @@ XdowsCiValidateAndCache(
     )
 {
     PFILE_OBJECT fileObject = NULL;
-    BOOLEAN trusted;
+    BOOLEAN trusted = FALSE;
+    BOOLEAN catalogApplied = FALSE;
     NTSTATUS status;
 
     status = g_CodeIntegrity.ReferenceProcessFilePointer(Process, &fileObject);
     if (!NT_SUCCESS(status) || fileObject == NULL) {
+        g_CodeIntegrity.SweepErrors++;
         return;
     }
 
     status = XdowsCiValidateFileObject(fileObject, &trusted);
     ObDereferenceObject(fileObject);
+
+    XdowsCiApplyCatalogFallback(
+        Process,
+        PsGetProcessId(Process),
+        &status,
+        &trusted,
+        &catalogApplied);
+
+    g_CodeIntegrity.SweepTotal++;
+    if (!NT_SUCCESS(status)) {
+        g_CodeIntegrity.SweepErrors++;
+    } else if (trusted) {
+        if (catalogApplied) {
+            g_CodeIntegrity.SweepCatalogTrusted++;
+        } else {
+            g_CodeIntegrity.SweepEmbeddedTrusted++;
+        }
+    } else {
+        WCHAR message[96];
+        PCSTR imageName = PsGetProcessImageFileName(Process);
+
+        g_CodeIntegrity.SweepUntrusted++;
+        if (imageName != NULL) {
+            (VOID)RtlStringCchPrintfW(
+                message,
+                RTL_NUMBER_OF(message),
+                L"Initial sweep untrusted image (catalog miss): %S",
+                imageName);
+            XdowsLogWrite(
+                XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity", message);
+        }
+    }
+
     if (NT_SUCCESS(status)) {
         XdowsCiRecordVerdict(
             HandleToULong(PsGetProcessId(Process)),
             PsGetProcessCreateTimeQuadPart(Process),
             trusted);
+    }
+}
+
+//
+// Initial sweep: validate every process that already existed when the driver
+// loaded. The create-notify callback only covers future creations, and this
+// driver starts on demand, so without this sweep the cache would stay empty
+// for the majority of system processes and the injection fast-allow path
+// would never engage for them.
+//
+static
+VOID
+XdowsCiValidateExistingProcesses(
+    VOID
+    )
+{
+    PXDOWS_CI_SYSTEM_PROCESS_INFORMATION info = NULL;
+    ULONG length = 0;
+    ULONG allocatedLength = 0;
+    PUCHAR bufferEnd;
+    PUCHAR entry;
+    NTSTATUS status;
+    ULONG attempt;
+
+    status = g_CodeIntegrity.QuerySystemInformation(
+        XDOWS_SYSTEM_PROCESS_INFORMATION_CLASS, NULL, 0, &length);
+    if (length == 0) {
+        return;
+    }
+
+    for (attempt = 0; attempt < 3; attempt++) {
+        allocatedLength = length + 0x400u;
+        info = (PXDOWS_CI_SYSTEM_PROCESS_INFORMATION)ExAllocatePool2(
+            POOL_FLAG_PAGED, allocatedLength, XDOWS_CI_POOL_TAG);
+        if (info == NULL) {
+            return;
+        }
+
+        status = g_CodeIntegrity.QuerySystemInformation(
+            XDOWS_SYSTEM_PROCESS_INFORMATION_CLASS,
+            info,
+            allocatedLength,
+            &length);
+        if (status != STATUS_INFO_LENGTH_MISMATCH) {
+            break;
+        }
+
+        ExFreePoolWithTag(info, XDOWS_CI_POOL_TAG);
+        info = NULL;
+    }
+
+    if (!NT_SUCCESS(status) || info == NULL) {
+        if (info != NULL) {
+            ExFreePoolWithTag(info, XDOWS_CI_POOL_TAG);
+        }
+        return;
+    }
+
+    bufferEnd = (PUCHAR)info + allocatedLength;
+    entry = (PUCHAR)info;
+
+    while (entry + sizeof(XDOWS_CI_SYSTEM_PROCESS_INFORMATION) <= bufferEnd) {
+        PXDOWS_CI_SYSTEM_PROCESS_INFORMATION process =
+            (PXDOWS_CI_SYSTEM_PROCESS_INFORMATION)entry;
+        ULONG nextOffset = process->NextEntryOffset;
+
+        if (process->UniqueProcessId != NULL) {
+            PEPROCESS processObject = NULL;
+
+            if (NT_SUCCESS(g_CodeIntegrity.LookupProcessById(
+                    process->UniqueProcessId,
+                    &processObject))) {
+                XdowsCiValidateAndCache(processObject);
+                ObDereferenceObject(processObject);
+            }
+        }
+
+        if (nextOffset == 0 ||
+            nextOffset < sizeof(XDOWS_CI_SYSTEM_PROCESS_INFORMATION) ||
+            entry + nextOffset >= bufferEnd) {
+            break;
+        }
+        entry += nextOffset;
+    }
+
+    ExFreePoolWithTag(info, XDOWS_CI_POOL_TAG);
+
+    //
+    // Diagnostics: the split between embedded and catalog verdicts is the
+    // primary signal for verifying that ci.dll catalog fallback works on
+    // the target machine.
+    //
+    {
+        WCHAR message[128];
+        (VOID)RtlStringCchPrintfW(
+            message,
+            RTL_NUMBER_OF(message),
+            L"Initial sweep: total=%u embedded=%u catalog=%u untrusted=%u errors=%u",
+            g_CodeIntegrity.SweepTotal,
+            g_CodeIntegrity.SweepEmbeddedTrusted,
+            g_CodeIntegrity.SweepCatalogTrusted,
+            g_CodeIntegrity.SweepUntrusted,
+            g_CodeIntegrity.SweepErrors);
+        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"CodeIntegrity", message);
     }
 }
 
@@ -519,6 +1156,19 @@ XdowsCiWorkItemRoutine(
         NTSTATUS status;
 
         status = XdowsCiValidateFileObject(item->FileObject, &trusted);
+
+        //
+        // Same catalog fallback as the initial sweep: processes created at
+        // runtime must also reach a trusted verdict when they are only
+        // catalog-signed (taskhostw.exe, conhost.exe, ...).
+        //
+        XdowsCiApplyCatalogFallback(
+            NULL,
+            (HANDLE)UlongToHandle(item->ProcessId),
+            &status,
+            &trusted,
+            NULL);
+
         if (NT_SUCCESS(status)) {
             XdowsCiRecordVerdict(
                 item->ProcessId,
@@ -529,15 +1179,8 @@ XdowsCiWorkItemRoutine(
     } else if (item->Process != NULL) {
         XdowsCiValidateAndCache(item->Process);
         ObDereferenceObject(item->Process);
-    } else if (g_CodeIntegrity.GetNextProcess != NULL) {
-        PEPROCESS current = NULL;
-
-        // PsGetNextProcess consumes the reference supplied as its argument
-        // and returns a referenced successor. Do not dereference current
-        // separately or the enumeration would double-release EPROCESS.
-        while ((current = g_CodeIntegrity.GetNextProcess(current)) != NULL) {
-            XdowsCiValidateAndCache(current);
-        }
+    } else {
+        XdowsCiValidateExistingProcesses();
     }
 
     IoFreeWorkItem(item->WorkItem);
@@ -643,13 +1286,15 @@ XdowsCodeIntegrityInitialize(
     g_CodeIntegrity.QuerySystemInformation =
         (XDOWS_ZW_QUERY_SYSTEM_INFORMATION)XdowsCiGetSystemRoutine(
             L"ZwQuerySystemInformation");
-    g_CodeIntegrity.GetNextProcess =
-        (XDOWS_PS_GET_NEXT_PROCESS)XdowsCiGetSystemRoutine(L"PsGetNextProcess");
+    g_CodeIntegrity.LookupProcessById =
+        (XDOWS_PS_LOOKUP_PROCESS_BY_ID)XdowsCiGetSystemRoutine(
+            L"PsLookupProcessByProcessId");
     g_CodeIntegrity.ReferenceProcessFilePointer =
         (XDOWS_PS_REFERENCE_PROCESS_FILE_POINTER)XdowsCiGetSystemRoutine(
             L"PsReferenceProcessFilePointer");
 
     if (g_CodeIntegrity.QuerySystemInformation == NULL ||
+        g_CodeIntegrity.LookupProcessById == NULL ||
         g_CodeIntegrity.ReferenceProcessFilePointer == NULL) {
         XdowsLogWrite(XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity",
             L"Required kernel routines unavailable; CI signature cache disabled.");
@@ -673,10 +1318,18 @@ XdowsCodeIntegrityInitialize(
         g_CodeIntegrity.FreePolicyInfo == NULL) {
         g_CodeIntegrity.ValidateFileObject = NULL;
         g_CodeIntegrity.FreePolicyInfo = NULL;
+        g_CodeIntegrity.VerifyHashInCatalog = NULL;
         XdowsLogWrite(XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity",
             L"ci.dll validation exports unavailable; signature cache disabled.");
         return STATUS_SUCCESS;
     }
+
+    // Optional enhancement: catalog verification covers catalog-signed OS
+    // binaries (svchost.exe, services.exe, csrss.exe, ...) whose PE carries
+    // only a hash stub. Missing export only disables the fallback.
+    g_CodeIntegrity.VerifyHashInCatalog =
+        (XDOWS_CI_VERIFY_HASH_IN_CATALOG)XdowsCiResolveExport(
+            ciBase, ciSize, "CiVerifyHashInCatalog");
 
     (VOID)InterlockedExchange(&g_CodeIntegrity.AcceptingWork, 1);
     status = PsSetCreateProcessNotifyRoutineEx(XdowsCiProcessNotify, FALSE);
@@ -684,6 +1337,7 @@ XdowsCodeIntegrityInitialize(
         (VOID)InterlockedExchange(&g_CodeIntegrity.AcceptingWork, 0);
         g_CodeIntegrity.ValidateFileObject = NULL;
         g_CodeIntegrity.FreePolicyInfo = NULL;
+        g_CodeIntegrity.VerifyHashInCatalog = NULL;
         XdowsLogWriteStatus(XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity",
             L"Process notification registration failed; signature cache disabled",
             status);
@@ -715,6 +1369,7 @@ XdowsCodeIntegrityShutdown(
     ExWaitForRundownProtectionRelease(&g_CodeIntegrity.WorkRundown);
     g_CodeIntegrity.ValidateFileObject = NULL;
     g_CodeIntegrity.FreePolicyInfo = NULL;
+    g_CodeIntegrity.VerifyHashInCatalog = NULL;
     RtlZeroMemory(g_CodeIntegrity.Verdicts, sizeof(g_CodeIntegrity.Verdicts));
     g_CodeIntegrity.Initialized = FALSE;
 

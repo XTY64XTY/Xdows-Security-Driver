@@ -41,6 +41,30 @@ Environment:
 //
 NTKERNELAPI PEPROCESS PsGetThreadProcess(_In_ PETHREAD Thread);
 
+//
+// SeLocateProcessImageName is likewise declared in ntifs.h only. It returns
+// the cached image path (\Device\... form) of a process without touching the
+// file system, so it is safe here at PASSIVE_LEVEL even with kernel APCs
+// disabled.
+//
+NTKERNELAPI
+NTSTATUS
+SeLocateProcessImageName(
+    _In_ PEPROCESS Process,
+    _Outptr_ PUNICODE_STRING* pImageFileName
+    );
+
+//
+// PsGetProcessImageFileName is declared in ntifs.h only. It returns the
+// truncated (15-char) image file name cached in the EPROCESS. Used by the
+// system-actor fast-allow gate below; matches the usage in CodeIntegrity.c.
+//
+NTKERNELAPI
+PCHAR
+PsGetProcessImageFileName(
+    _In_ PEPROCESS Process
+    );
+
 #ifndef PROCESS_SUSPEND_RESUME
 #define PROCESS_SUSPEND_RESUME 0x0800
 #endif
@@ -58,20 +82,22 @@ NTKERNELAPI PEPROCESS PsGetThreadProcess(_In_ PETHREAD Thread);
 #endif
 
 //
-// Primary injection primitive: remote thread creation, memory writes, and
-// handle duplication into the target. Each is dangerous on its own.
+// High-confidence injection primitives. Remote thread creation and remote
+// memory writes are actionable on their own. PROCESS_VM_OPERATION and
+// PROCESS_DUP_HANDLE are intentionally excluded: debuggers, profilers,
+// service hosts and security products request them routinely, and neither
+// one alone proves code injection.
 //
 #define XDOWS_INJECTION_PROCESS_PRIMARY_MASK    \
-    (PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | \
-     PROCESS_DUP_HANDLE)
+    (PROCESS_CREATE_THREAD | PROCESS_VM_WRITE)
 
 //
-// PROCESS_SUSPEND_RESUME is benign alone (jobs, profilers, debuggers) and
-// produces high false-positive rates. It is treated as a threat only when
-// paired with PROCESS_VM_WRITE, which forms the classic "suspend then write"
-// injection prefix.
+// PROCESS_VM_OPERATION and PROCESS_SUSPEND_RESUME are benign alone. Treat
+// them as supporting indicators only when the same handle also requests
+// PROCESS_VM_WRITE.
 //
-#define XDOWS_INJECTION_PROCESS_SUSPEND_RESUME_MASK    (PROCESS_SUSPEND_RESUME)
+#define XDOWS_INJECTION_PROCESS_CONDITIONAL_MASK    \
+    (PROCESS_VM_OPERATION | PROCESS_SUSPEND_RESUME)
 #define XDOWS_INJECTION_PROCESS_VM_WRITE_MASK          (PROCESS_VM_WRITE)
 
 //
@@ -173,7 +199,7 @@ XdowsInjectionResolveTarget(
         Target->EventType = XdowsSecurityEventProcessHandle;
         Target->TargetCreateTime = PsGetProcessCreateTimeQuadPart(proc);
         Target->PrimaryMask = XDOWS_INJECTION_PROCESS_PRIMARY_MASK;
-        Target->ConditionalMask = XDOWS_INJECTION_PROCESS_SUSPEND_RESUME_MASK;
+        Target->ConditionalMask = XDOWS_INJECTION_PROCESS_CONDITIONAL_MASK;
         Target->ConditionalTrigger = XDOWS_INJECTION_PROCESS_VM_WRITE_MASK;
         return TRUE;
     }
@@ -326,6 +352,44 @@ XdowsInjectionRecordVerdict(
 }
 
 //
+// Capture the acting process image path (\Device\... form) into the consult
+// event. User-mode PID-based resolution fails for protected processes
+// (MainModule is inaccessible) and for actors that exit before the decision
+// pipeline runs, which previously degraded the signer-trust gate to useless
+// "PID n" prompts. The kernel-side cached name has neither limitation.
+//
+static
+VOID
+XdowsInjectionCopyActorImagePath(
+    _Out_writes_(PathChars) PWCHAR Path,
+    _In_ ULONG PathChars
+    )
+{
+    PUNICODE_STRING imageName = NULL;
+    NTSTATUS status;
+
+    if (Path == NULL || PathChars == 0) {
+        return;
+    }
+    Path[0] = UNICODE_NULL;
+
+    status = SeLocateProcessImageName(PsGetCurrentProcess(), &imageName);
+    if (!NT_SUCCESS(status) || imageName == NULL ||
+        imageName->Buffer == NULL ||
+        imageName->Length == 0 ||
+        imageName->Length >= PathChars * sizeof(WCHAR)) {
+        if (imageName != NULL) {
+            ExFreePool(imageName);
+        }
+        return;
+    }
+
+    RtlCopyMemory(Path, imageName->Buffer, imageName->Length);
+    Path[imageName->Length / sizeof(WCHAR)] = UNICODE_NULL;
+    ExFreePool(imageName);
+}
+
+//
 // Ask user-mode policy for a decision on the dangerous handle request.
 // Returns TRUE on Allow, FALSE on Block/Timeout/error.
 //
@@ -375,6 +439,10 @@ XdowsInjectionConsultUser(
         L"desired-access=0x%08X",
         DesiredAccess);
 
+    XdowsInjectionCopyActorImagePath(
+        event.ActorImagePath,
+        RTL_NUMBER_OF(event.ActorImagePath));
+
     if (EventId != NULL) {
         *EventId = event.EventId;
     }
@@ -413,6 +481,143 @@ XdowsInjectionConsultUser(
     // which would otherwise break legitimate handle requests.
     //
     return decision.Decision != XdowsSecurityDecisionBlock;
+}
+
+//
+// Case-insensitive ASCII comparison capped at the EPROCESS image-name
+// truncation length (15 chars). PsGetProcessImageFileName reports the
+// truncated prefix for long names, so known names are matched by their
+// truncated prefix, which is exactly what the kernel returns.
+//
+#define XDOWS_INJECTION_IMAGE_NAME_MAX_CHARS 15u
+
+static
+BOOLEAN
+XdowsInjectionImageNameEquals(
+    _In_ PCSTR ImageName,
+    _In_ PCSTR KnownName
+    )
+{
+    ULONG i;
+
+    for (i = 0; i < XDOWS_INJECTION_IMAGE_NAME_MAX_CHARS; i++) {
+        CHAR left = ImageName[i];
+        CHAR right = KnownName[i];
+        CHAR upperL;
+        CHAR upperR;
+
+        if (left == 0 || right == 0) {
+            return left == right;
+        }
+
+        upperL = (left >= 'a' && left <= 'z')
+            ? (CHAR)(left - ('a' - 'A'))
+            : left;
+        upperR = (right >= 'a' && right <= 'z')
+            ? (CHAR)(right - ('a' - 'A'))
+            : right;
+        if (upperL != upperR) {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
+//
+// Beta convergence: well-known OS/shell images are allowed without user-mode
+// consultation. During startup, system processes (svchost, services, lsass,
+// the shell) open dangerous cross-process handles routinely; each one used to
+// block on the 500ms synchronous consultation, stalling application launch
+// while the user sat through "confirmed threat" prompts that then failed
+// open. The kernel-cached image name identifies these actors cheaply. The
+// list is deliberately conservative and only covers OS/shell images, never
+// third-party binaries. CI-trusted signatures (checked before this gate)
+// remain the primary trust signal.
+//
+static
+BOOLEAN
+XdowsInjectionIsKnownSystemActor(
+    VOID
+    )
+{
+    static const PCSTR knownActors[] = {
+        "svchost.exe",
+        "services.exe",
+        "lsass.exe",
+        "csrss.exe",
+        "wininit.exe",
+        "winlogon.exe",
+        "dwm.exe",
+        "explorer.exe",
+        "SearchHost.exe",
+        "RuntimeBroker.exe",
+        "ApplicationFrameHost.exe",
+        "ShellExperienceHost.exe",
+        "StartMenuExperienceHost.exe",
+        "Registry",
+        "smss.exe",
+        "fontdrvhost.exe",
+        "conhost.exe",
+        "WmiPrvSE.exe",
+        "taskhostw.exe",
+        "spoolsv.exe",
+        "audiodg.exe",
+        "System",
+        "Secure System"
+    };
+    PCSTR imageName;
+    SIZE_T i;
+
+    imageName = PsGetProcessImageFileName(PsGetCurrentProcess());
+    if (imageName == NULL) {
+        return FALSE;
+    }
+
+    for (i = 0; i < RTL_NUMBER_OF(knownActors); i++) {
+        if (XdowsInjectionImageNameEquals(imageName, knownActors[i])) {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+//
+// Log the fast-allow at most once per 5 seconds. System actors open handles
+// continuously; logging every hit would flood the event ring.
+//
+static volatile LONGLONG s_LastSystemActorAllowLog = 0;
+
+static
+VOID
+XdowsInjectionLogSystemActorAllow(
+    VOID
+    )
+{
+    ULONGLONG now;
+    LONGLONG last;
+
+    now = KeQueryInterruptTime();
+    last = InterlockedCompareExchange64(&s_LastSystemActorAllowLog, 0, 0);
+
+    if (now - (ULONGLONG)last < 50000000ULL) {
+        return;
+    }
+
+    if (InterlockedCompareExchange64(
+            &s_LastSystemActorAllowLog,
+            (LONGLONG)now,
+            last) != last) {
+        return;
+    }
+
+    XdowsLogWrite(
+        XdowsSecurityLogInfo,
+        0,
+        0,
+        L"Injection",
+        L"Known system actor handle request allowed (Beta fast-allow).");
 }
 
 static
@@ -479,6 +684,19 @@ XdowsInjectionPreOperation(
         PsGetCurrentProcess(),
         &sourceTrusted);
     if (signatureKnown && sourceTrusted) {
+        return OB_PREOP_SUCCESS;
+    }
+
+    //
+    // Beta convergence: well-known OS/shell images are allowed without
+    // user-mode consultation. The CI gate above covers signed actors once
+    // the async cache warms; this name gate additionally covers system
+    // processes whose signature is not yet resolved (cold cache right after
+    // driver load, when most startup handle traffic happens). This trades a
+    // small amount of detection coverage for startup responsiveness.
+    //
+    if (XdowsInjectionIsKnownSystemActor()) {
+        XdowsInjectionLogSystemActorAllow();
         return OB_PREOP_SUCCESS;
     }
 
