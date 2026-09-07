@@ -304,6 +304,14 @@ XdowsFilePreWrite(
 // RTL_CONSTANT_STRING, so the table needs no runtime initialization and is
 // safe to read concurrently from multiple minifilter callbacks.
 //
+// Narrowed to executable carriers only (exe/dll/scr/com/pif/sys). Document and
+// script formats (docx/xlsx/pdf/zip/...) previously produced a file event
+// per write, which flooded the user-mode bridge and drove the main app's
+// memory working set past 500 MB during builds and archive extraction.
+// Process-launch interception and command-line behavior rules still cover
+// script/binary execution through the process-notify path, so dropping the
+// document extensions here loses no execution coverage.
+//
 static
 BOOLEAN
 XdowsFileIsScannablePath(
@@ -312,18 +320,8 @@ XdowsFileIsScannablePath(
 {
     static const UNICODE_STRING Entries[] = {
         RTL_CONSTANT_STRING(L".exe"  ), RTL_CONSTANT_STRING(L".dll"  ),
-        RTL_CONSTANT_STRING(L".sys"  ), RTL_CONSTANT_STRING(L".scr"  ),
-        RTL_CONSTANT_STRING(L".bat"  ), RTL_CONSTANT_STRING(L".cmd"  ),
-        RTL_CONSTANT_STRING(L".ps1"  ), RTL_CONSTANT_STRING(L".vbs"  ),
-        RTL_CONSTANT_STRING(L".js"   ), RTL_CONSTANT_STRING(L".jse"  ),
-        RTL_CONSTANT_STRING(L".wsf"  ), RTL_CONSTANT_STRING(L".msi"  ),
-        RTL_CONSTANT_STRING(L".msp"  ), RTL_CONSTANT_STRING(L".cab"  ),
-        RTL_CONSTANT_STRING(L".zip"  ), RTL_CONSTANT_STRING(L".rar"  ),
-        RTL_CONSTANT_STRING(L".7z"   ), RTL_CONSTANT_STRING(L".iso"  ),
-        RTL_CONSTANT_STRING(L".doc"  ), RTL_CONSTANT_STRING(L".docx" ),
-        RTL_CONSTANT_STRING(L".xls"  ), RTL_CONSTANT_STRING(L".xlsx" ),
-        RTL_CONSTANT_STRING(L".ppt"  ), RTL_CONSTANT_STRING(L".pptx" ),
-        RTL_CONSTANT_STRING(L".pdf"  )
+        RTL_CONSTANT_STRING(L".scr"  ), RTL_CONSTANT_STRING(L".com"  ),
+        RTL_CONSTANT_STRING(L".pif"  ), RTL_CONSTANT_STRING(L".sys"  )
     };
     ULONG i;
 
