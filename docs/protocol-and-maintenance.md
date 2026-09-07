@@ -36,6 +36,31 @@ Protocol 9 adds the `SetBootProtection` (0x80E) and `SetRegistryProtection`
 (0x80F) IOCTLs, the `RegistryWrite` event (type 11), the R0 registry protection
 capability bit `0x200`, and the `Registry` module bit `0x40`.
 
+The memory-optimization block (same protocol version 9, additive only) adds:
+
+- `IOCTL_XDOWS_SECURITY_GET_NEXT_EVENTS` (0x810) and `XDOWS_SECURITY_EVENT_BATCH`
+  (batch size 16, whole struct under the 85 KB .NET LOH threshold for buffer
+  pooling). The call never blocks; the client paces its own drain loop and
+  reads only `Count` entries. Capability bit `0x800`.
+- `XDOWS_SECURITY_REGISTER_FLAG_ASYNC_REVIEW` (`Flags` bit 0x1 in
+  `REGISTER_CLIENT`): non-critical event types are queued for display but the
+  origin thread returns immediately with the default Allow decision. Capability
+  bit `0x400`. Unknown flag bits are ignored for forward compatibility.
+- Per-type sliding-window (1 s) rate limits for non-critical noise types
+  (file create 200/s, file write 300/s, file rename 100/s, driver log 100/s).
+  Throttled events are dropped silently (no log entry, no user-mode event) and
+  counted in `DroppedByType`. Critical types (process create, handle/thread
+  operations, confirmed behavior, boot writes, registry writes) are never
+  throttled, so protection is not weakened.
+- The `FileProtect` scannable-extension allowlist is narrowed to
+  exe/dll/scr/com/pif/sys; script and document formats are covered at
+  execution time by process-launch and command-line behavior rules.
+
+The main app repository must mirror the new struct/IOCTL/flags in
+`DriverProtocol.cs` and `DriverBridgeClient.cs` to use the batch drain and
+async review; older app builds keep working unchanged because every addition
+is opt-in via capability/flag bits.
+
 Any change to `Public.h` that modifies a struct layout, enum value, IOCTL function code, string buffer length, token length, or device path requires all of the following in the same block:
 
 1. Update `Protection\DriverProtocol.cs`.
@@ -66,6 +91,7 @@ Do not reuse old enum values for new meanings. Add new values at the end unless 
 | `IOCTL_XDOWS_SECURITY_OPERATE_PROCESS` | `0x80D` | `OperateProcess` | Suspend, resume, or terminate a process after protected-client and token validation. |
 | `IOCTL_XDOWS_SECURITY_SET_BOOT_PROTECTION` | `0x80E` | `SetBootProtection` | Configure EFI and BCD boot protection. |
 | `IOCTL_XDOWS_SECURITY_SET_REGISTRY_PROTECTION` | `0x80F` | `SetRegistryProtection` | Configure R0 registry protection rules. |
+| `IOCTL_XDOWS_SECURITY_GET_NEXT_EVENTS` | `0x810` | `GetNextEvents` | Drain up to 16 undelivered events in one call; never blocks. |
 
 Process management requests require both the registered, self-protected main process identity and the authorization token issued during registration. The driver rejects PID 0, PID 4, the calling main process, the protected process, and critical processes.
 
