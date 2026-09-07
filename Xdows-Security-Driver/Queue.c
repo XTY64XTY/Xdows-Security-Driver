@@ -266,6 +266,33 @@ Return Value:
         }
         break;
     }
+    case IOCTL_XDOWS_SECURITY_GET_NEXT_EVENTS:
+    {
+        PXDOWS_SECURITY_EVENT_BATCH output;
+
+        UNREFERENCED_PARAMETER(InputBufferLength);
+
+        status = XdowsRequireRegisteredClient(Request, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        //
+        // The client chooses the buffer size; the driver fills as many
+        // events as fit (up to XDOWS_SECURITY_EVENT_BATCH_SIZE).
+        //
+        status = WdfRequestRetrieveOutputBuffer(Request, 0, (PVOID*)&output, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = XdowsGetNextPendingEventsBatch(output, (ULONG)OutputBufferLength);
+        if (NT_SUCCESS(status)) {
+            information = sizeof(XDOWS_SECURITY_PROTOCOL_HEADER) +
+                output->Count * sizeof(XDOWS_SECURITY_EVENT);
+        }
+        break;
+    }
     case IOCTL_XDOWS_SECURITY_SUBMIT_DECISION:
     {
         PXDOWS_SECURITY_DECISION input;

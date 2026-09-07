@@ -34,6 +34,33 @@ SeLocateProcessImageName(
 static const UNICODE_STRING g_XdowsClientImageName =
     RTL_CONSTANT_STRING(L"Xdows-Security.exe");
 
+//
+// Throttle window (100ns units) and per-type event-rate limits.
+//
+// Only non-critical event types are limited. Critical types (process launch,
+// handle/thread operations, confirmed behavior, boot writes, registry
+// writes) keep every event so protection is never weakened; the noise types
+// (file create/write/rename, driver log) are capped per one-second window so
+// a build or archive extraction cannot flood the user-mode bridge and drive
+// the main program's memory working set upward.
+//
+#define XDOWS_THROTTLE_WINDOW_100NS (10 * 1000 * 1000)
+
+static const ULONG XdowsThrottleLimitPerType[XDOWS_SECURITY_EVENT_TYPE_COUNT] = {
+    0,     /* XdowsSecurityEventNone          */
+    0,     /* XdowsSecurityEventProcessCreate critical */
+    200,   /* XdowsSecurityEventFileCreate    noise */
+    300,   /* XdowsSecurityEventFileWrite     noise */
+    100,   /* XdowsSecurityEventFileRename    noise */
+    0,     /* XdowsSecurityEventProcessHandle critical */
+    0,     /* XdowsSecurityEventThreadHandle  critical */
+    0,     /* XdowsSecurityEventImageLoad     critical */
+    100,   /* XdowsSecurityEventDriverLog     noise */
+    0,     /* XdowsSecurityEventBehavior      confirmed threat */
+    0,     /* XdowsSecurityEventBootWrite     critical */
+    0,     /* XdowsSecurityEventRegistryWrite critical */
+};
+
 static
 NTSTATUS
 XdowsValidateClientProcess(
@@ -154,6 +181,7 @@ XdowsShutdownGlobalContext(
 
     KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
     g_XdowsDriverContext.ClientConnected = FALSE;
+    g_XdowsDriverContext.AsyncReviewEnabled = FALSE;
 
     while (!IsListEmpty(&g_XdowsDriverContext.PendingEvents)) {
         PLIST_ENTRY entry = RemoveHeadList(&g_XdowsDriverContext.PendingEvents);
@@ -170,6 +198,13 @@ XdowsShutdownGlobalContext(
     while (!IsListEmpty(&localList)) {
         PLIST_ENTRY entry = RemoveHeadList(&localList);
         PXDOWS_PENDING_EVENT pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
+        if (pending->Async) {
+            //
+            // Async-review entries have no waiting thread; release directly.
+            //
+            ExFreePoolWithTag(pending, 'swDX');
+            continue;
+        }
         pending->Decision.Header.Size = sizeof(XDOWS_SECURITY_DECISION);
         pending->Decision.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
         pending->Decision.Decision = XdowsSecurityDecisionAllow;
@@ -231,6 +266,8 @@ XdowsRegisterClient(
     }
     g_XdowsDriverContext.ClientConnected = TRUE;
     g_XdowsDriverContext.ClientProcessId = ULongToHandle(RequestorProcessId);
+    g_XdowsDriverContext.AsyncReviewEnabled =
+        (Request->Flags & XDOWS_SECURITY_REGISTER_FLAG_ASYNC_REVIEW) != 0;
     KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
 
     RtlZeroMemory(Response, sizeof(*Response));
@@ -294,6 +331,7 @@ XdowsDisconnectClient(
     KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
     g_XdowsDriverContext.ClientConnected = FALSE;
     g_XdowsDriverContext.ClientProcessId = NULL;
+    g_XdowsDriverContext.AsyncReviewEnabled = FALSE;
 
     while (!IsListEmpty(&g_XdowsDriverContext.PendingEvents)) {
         PLIST_ENTRY entry = RemoveHeadList(&g_XdowsDriverContext.PendingEvents);
@@ -308,6 +346,14 @@ XdowsDisconnectClient(
     while (!IsListEmpty(&localList)) {
         PLIST_ENTRY entry = RemoveHeadList(&localList);
         PXDOWS_PENDING_EVENT pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
+        if (pending->Async) {
+            //
+            // Async-review entries have no waiting thread; the poller owns
+            // the allocation and would free it on read. Release it directly.
+            //
+            ExFreePoolWithTag(pending, 'swDX');
+            continue;
+        }
         pending->Decision.Header.Size = sizeof(XDOWS_SECURITY_DECISION);
         pending->Decision.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
         pending->Decision.EventId = pending->Event.EventId;
@@ -363,7 +409,21 @@ XdowsGetNextPendingEvent(
             if (!pending->Delivered) {
                 pending->Delivered = TRUE;
                 RtlCopyMemory(Event, &pending->Event, sizeof(*Event));
-                KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+                if (pending->Async) {
+                    //
+                    // Async-review entries are owned by the poller: remove
+                    // them now and release the allocation outside the lock.
+                    //
+                    RemoveEntryList(&pending->Link);
+                    pending->Linked = FALSE;
+                    if (g_XdowsDriverContext.PendingEventCount > 0) {
+                        g_XdowsDriverContext.PendingEventCount--;
+                    }
+                    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+                    ExFreePoolWithTag(pending, 'swDX');
+                } else {
+                    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+                }
                 return STATUS_SUCCESS;
             }
         }
@@ -380,6 +440,96 @@ XdowsGetNextPendingEvent(
             return STATUS_NO_MORE_ENTRIES;
         }
     }
+}
+
+NTSTATUS
+XdowsGetNextPendingEventsBatch(
+    _Out_ PXDOWS_SECURITY_EVENT_BATCH Batch,
+    _In_ ULONG OutputBufferLength
+    )
+/*++
+
+Routine Description:
+
+    Drains up to XDOWS_SECURITY_EVENT_BATCH_SIZE undelivered events into the
+    caller-provided buffer. Sync-review entries are marked Delivered and stay
+    queued until their decision completes; async-review entries are removed
+    from the queue and released, because no origin thread is waiting on them.
+
+    This call never blocks. The client paces itself (e.g. one drain every
+    500 ms) and keeps the events it needs; the kernel queue remains bounded
+    by XDOWS_SECURITY_MAX_PENDING_EVENTS.
+
+--*/
+{
+    KIRQL oldIrql;
+    PLIST_ENTRY entry;
+    PLIST_ENTRY next;
+    PXDOWS_PENDING_EVENT pending;
+    LIST_ENTRY freeList;
+    ULONG capacity;
+    ULONG count = 0;
+    ULONG removed = 0;
+
+    if (Batch == NULL) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    if (OutputBufferLength <
+        (ULONG)sizeof(XDOWS_SECURITY_PROTOCOL_HEADER) +
+        (ULONG)sizeof(XDOWS_SECURITY_EVENT)) {
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    capacity = (OutputBufferLength - (ULONG)sizeof(XDOWS_SECURITY_PROTOCOL_HEADER))
+        / (ULONG)sizeof(XDOWS_SECURITY_EVENT);
+    if (capacity > XDOWS_SECURITY_EVENT_BATCH_SIZE) {
+        capacity = XDOWS_SECURITY_EVENT_BATCH_SIZE;
+    }
+
+    RtlZeroMemory(&Batch->Header, sizeof(Batch->Header));
+    Batch->Count = 0;
+    Batch->Reserved = 0;
+    XdowsInitializeHeader(&Batch->Header, sizeof(*Batch));
+    InitializeListHead(&freeList);
+
+    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
+
+    entry = g_XdowsDriverContext.PendingEvents.Flink;
+    while (entry != &g_XdowsDriverContext.PendingEvents && count < capacity) {
+        next = entry->Flink;
+        pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
+        if (!pending->Delivered) {
+            pending->Delivered = TRUE;
+            RtlCopyMemory(&Batch->Events[count], &pending->Event, sizeof(pending->Event));
+            count++;
+            if (pending->Async) {
+                RemoveEntryList(&pending->Link);
+                pending->Linked = FALSE;
+                removed++;
+                InsertTailList(&freeList, &pending->Link);
+            }
+        }
+        entry = next;
+    }
+
+    if (removed > 0) {
+        if (g_XdowsDriverContext.PendingEventCount >= removed) {
+            g_XdowsDriverContext.PendingEventCount -= removed;
+        } else {
+            g_XdowsDriverContext.PendingEventCount = 0;
+        }
+    }
+    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+
+    while (!IsListEmpty(&freeList)) {
+        entry = RemoveHeadList(&freeList);
+        pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
+        ExFreePoolWithTag(pending, 'swDX');
+    }
+
+    Batch->Count = count;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS
@@ -437,6 +587,7 @@ XdowsQueueEventAndWait(
     PXDOWS_PENDING_EVENT pending;
     BOOLEAN linked = FALSE;
     BOOLEAN userDecisionPending = FALSE;
+    BOOLEAN async = FALSE;
 
     RtlZeroMemory(Decision, sizeof(*Decision));
     XdowsInitializeHeader(&Decision->Header, sizeof(*Decision));
@@ -450,6 +601,32 @@ XdowsQueueEventAndWait(
     if (Event->EventType < XDOWS_SECURITY_EVENT_TYPE_COUNT) {
         g_XdowsDriverContext.ReceivedByType[Event->EventType]++;
     }
+
+    //
+    // Sliding-window rate limit for non-critical noise types. A throttle
+    // drop is silent (no log entry, no user-mode event): the flood is
+    // bounded without churning the 256-entry log ring or the bridge.
+    //
+    if (Event->EventType < XDOWS_SECURITY_EVENT_TYPE_COUNT) {
+        ULONG limit = XdowsThrottleLimitPerType[Event->EventType];
+        if (limit != 0) {
+            ULONGLONG now = KeQueryInterruptTime();
+            PXDOWS_THROTTLE_SLOT slot = &g_XdowsDriverContext.Throttle[Event->EventType];
+            if (slot->Count == 0 ||
+                now - slot->WindowStart100ns >= XDOWS_THROTTLE_WINDOW_100NS) {
+                slot->WindowStart100ns = now;
+                slot->Count = 1;
+            } else if (slot->Count >= limit) {
+                g_XdowsDriverContext.DroppedEventCount++;
+                g_XdowsDriverContext.DroppedByType[Event->EventType]++;
+                KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+                return STATUS_NO_MORE_ENTRIES;
+            } else {
+                slot->Count++;
+            }
+        }
+    }
+
     if (!g_XdowsDriverContext.ClientConnected) {
         g_XdowsDriverContext.DroppedEventCount++;
         if (Event->EventType < XDOWS_SECURITY_EVENT_TYPE_COUNT) {
@@ -494,6 +671,13 @@ XdowsQueueEventAndWait(
 
     RtlCopyMemory(&pending->Event, Event, sizeof(*Event));
     KeInitializeEvent(&pending->DecisionEvent, NotificationEvent, FALSE);
+    //
+    // Async review mode: non-critical events are queued for the poller but
+    // the origin thread returns immediately with the default Allow decision.
+    // The poller removes and releases the entry on read.
+    //
+    pending->Async = g_XdowsDriverContext.AsyncReviewEnabled &&
+        !XdowsIsCriticalEventType(Event->EventType);
 
     KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
     if (g_XdowsDriverContext.ClientConnected &&
@@ -521,12 +705,26 @@ XdowsQueueEventAndWait(
             g_XdowsDriverContext.DroppedByType[Event->EventType]++;
         }
     }
+    //
+    // Capture under the lock: once the entry is linked, the poller may
+    // remove and free an async entry immediately after we release.
+    //
+    async = pending->Async;
     KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
 
     if (!linked) {
         ExFreePoolWithTag(pending, 'swDX');
         XdowsLogWrite(XdowsSecurityLogWarning, Event->EventId, Event->CorrelationId, L"Queue", L"Event dropped before delivery.");
         return STATUS_DEVICE_NOT_CONNECTED;
+    }
+
+    if (async) {
+        //
+        // Async review mode: no thread waits on DecisionEvent. The entry
+        // stays queued until the poller reads it (and frees it). Callers
+        // see the default Allow decision.
+        //
+        return STATUS_SUCCESS;
     }
 
     for (;;) {
