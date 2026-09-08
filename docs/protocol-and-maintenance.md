@@ -46,12 +46,15 @@ The memory-optimization block (same protocol version 9, additive only) adds:
   `REGISTER_CLIENT`): non-critical event types are queued for display but the
   origin thread returns immediately with the default Allow decision. Capability
   bit `0x400`. Unknown flag bits are ignored for forward compatibility.
+  `FileRename` is excluded: it runs in `PreSetInformation`, can fail the
+  operation with `STATUS_VIRUS_INFECTED`, and must stay synchronous so user
+  mode can still block ransomware-style renames.
 - Per-type sliding-window (1 s) rate limits for non-critical noise types
-  (file create 200/s, file write 300/s, file rename 100/s, driver log 100/s).
+  (file create 200/s, file write 300/s, driver log 100/s).
   Throttled events are dropped silently (no log entry, no user-mode event) and
-  counted in `DroppedByType`. Critical types (process create, handle/thread
-  operations, confirmed behavior, boot writes, registry writes) are never
-  throttled, so protection is not weakened.
+  counted in `DroppedByType`. Critical types (process create, file rename,
+  handle/thread operations, confirmed behavior, boot writes, registry writes)
+  are never throttled, so protection is not weakened.
 - The `FileProtect` scannable-extension allowlist is narrowed to
   exe/dll/scr/com/pif/sys; script and document formats are covered at
   execution time by process-launch and command-line behavior rules.

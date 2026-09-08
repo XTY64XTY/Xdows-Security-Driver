@@ -38,11 +38,11 @@ static const UNICODE_STRING g_XdowsClientImageName =
 // Throttle window (100ns units) and per-type event-rate limits.
 //
 // Only non-critical event types are limited. Critical types (process launch,
-// handle/thread operations, confirmed behavior, boot writes, registry
-// writes) keep every event so protection is never weakened; the noise types
-// (file create/write/rename, driver log) are capped per one-second window so
-// a build or archive extraction cannot flood the user-mode bridge and drive
-// the main program's memory working set upward.
+// file rename, handle/thread operations, confirmed behavior, boot writes,
+// registry writes) keep every event so protection is never weakened; the
+// noise types (file create/write, driver log) are capped per one-second
+// window so a build or archive extraction cannot flood the user-mode bridge
+// and drive the main program's memory working set upward.
 //
 #define XDOWS_THROTTLE_WINDOW_100NS (10 * 1000 * 1000)
 
@@ -51,7 +51,7 @@ static const ULONG XdowsThrottleLimitPerType[XDOWS_SECURITY_EVENT_TYPE_COUNT] = 
     0,     /* XdowsSecurityEventProcessCreate critical */
     200,   /* XdowsSecurityEventFileCreate    noise */
     300,   /* XdowsSecurityEventFileWrite     noise */
-    100,   /* XdowsSecurityEventFileRename    noise */
+    0,     /* XdowsSecurityEventFileRename    critical (kernel-interceptable) */
     0,     /* XdowsSecurityEventProcessHandle critical */
     0,     /* XdowsSecurityEventThreadHandle  critical */
     0,     /* XdowsSecurityEventImageLoad     critical */
@@ -123,7 +123,14 @@ XdowsIsCriticalEventType(
         EventType == XdowsSecurityEventImageLoad ||
         EventType == XdowsSecurityEventBehavior ||
         EventType == XdowsSecurityEventBootWrite ||
-        EventType == XdowsSecurityEventRegistryWrite;
+        EventType == XdowsSecurityEventRegistryWrite ||
+        //
+        // FileRename runs in PreSetInformation and can fail the operation
+        // with STATUS_VIRUS_INFECTED on a Block verdict (ransomware-style
+        // executable renames). It must stay synchronous even in async review
+        // mode, otherwise user mode could never block a rename.
+        //
+        EventType == XdowsSecurityEventFileRename;
 }
 
 XDOWS_DRIVER_CONTEXT g_XdowsDriverContext;
