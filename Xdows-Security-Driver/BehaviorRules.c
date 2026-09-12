@@ -45,7 +45,121 @@ Environment:
 //
 #define XDOWS_BEHAVIOR_MAX_CMD_CHARS  XDOWS_SECURITY_MAX_COMMAND_CHARS
 
+//
+// EPROCESS image-name truncation length used by PsGetProcessImageFileName.
+// Matches the constant in InjectionProtect.c.
+//
+#define XDOWS_BEHAVIOR_IMAGE_NAME_MAX_CHARS 15u
+
 static volatile LONG g_BehaviorProtectionEnabled;
+
+//
+// PsGetProcessImageFileName is declared in ntifs.h only. Returns the cached
+// image name (truncated to 15 chars) of a process.
+//
+NTKERNELAPI
+PCHAR
+PsGetProcessImageFileName(
+    _In_ PEPROCESS Process
+    );
+
+//
+// PsLookupProcessByProcessId is declared in ntifs.h only; forward-declared
+// here. Exported by ntoskrnl.lib.
+//
+NTKERNELAPI
+NTSTATUS
+PsLookupProcessByProcessId(
+    _In_ HANDLE ProcessId,
+    _Outptr_ PEPROCESS* Process
+    );
+
+//
+// Case-insensitive ASCII leaf-name comparison capped at the EPROCESS
+// truncation length (15 chars). Path may be a full \Device\... path or a
+// plain file name; only the final component is compared.
+//
+static
+BOOLEAN
+XdowsBehaviorLeafNameEquals(
+    _In_ PCUNICODE_STRING Path,
+    _In_ PCSTR KnownName
+    )
+{
+    SIZE_T pathChars;
+    SIZE_T leafStart;
+    SIZE_T i;
+
+    if (Path == NULL || Path->Buffer == NULL || Path->Length == 0) {
+        return FALSE;
+    }
+
+    pathChars = Path->Length / sizeof(WCHAR);
+    leafStart = 0;
+    for (i = 0; i < pathChars; i++) {
+        if (Path->Buffer[i] == L'\\') {
+            leafStart = i + 1;
+        }
+    }
+
+    for (i = 0; i < XDOWS_BEHAVIOR_IMAGE_NAME_MAX_CHARS; i++) {
+        CHAR left;
+        CHAR right = KnownName[i];
+        WCHAR wc;
+
+        if (leafStart + i >= pathChars) {
+            return right == 0;
+        }
+        wc = Path->Buffer[leafStart + i];
+        if (wc > 0x7F) {
+            return FALSE;
+        }
+        left = (CHAR)wc;
+        if (left >= 'a' && left <= 'z') {
+            left = (CHAR)(left - ('a' - 'A'));
+        }
+        if (right >= 'a' && right <= 'z') {
+            right = (CHAR)(right - ('a' - 'A'));
+        }
+        if (left != right) {
+            return FALSE;
+        }
+    }
+
+    return KnownName[XDOWS_BEHAVIOR_IMAGE_NAME_MAX_CHARS] == 0;
+}
+
+static
+BOOLEAN
+XdowsBehaviorImageNameEquals(
+    _In_ PCSTR ImageName,
+    _In_ PCSTR KnownName
+    )
+{
+    SIZE_T i;
+
+    for (i = 0; i < XDOWS_BEHAVIOR_IMAGE_NAME_MAX_CHARS; i++) {
+        CHAR left = ImageName[i];
+        CHAR right = KnownName[i];
+        CHAR upperL;
+        CHAR upperR;
+
+        if (left == 0 || right == 0) {
+            return left == right;
+        }
+        upperL = (left >= 'a' && left <= 'z')
+            ? (CHAR)(left - ('a' - 'A'))
+            : left;
+        upperR = (right >= 'a' && right <= 'z')
+            ? (CHAR)(right - ('a' - 'A'))
+            : right;
+        if (upperL != upperR) {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
 
 NTSTATUS
 XdowsBehaviorProtectInitialize(
@@ -267,6 +381,112 @@ XdowsBehaviorInspectCommandLine(
         return XdowsSecurityBehaviorLolbinAbuse;
     }
 
+    //
+    // Rule 7: Recursive directory deletion. rd/rmdir with /s (recursive) and
+    // /q (quiet) is the canonical destructive wipe primitive used by both
+    // ransomware and cleanup scripts. User mode counts the target directory
+    // and prompts only when the blast radius exceeds 500 files; the kernel
+    // simply flags any matching command line. Matched as "rd "/"rd/" tokens
+    // so "rd" inside unrelated words does not trip the rule.
+    //
+    if (XdowsBehaviorContainsW(cmd, cmdLen, L"/s") &&
+        XdowsBehaviorContainsW(cmd, cmdLen, L"/q") &&
+        (XdowsBehaviorContainsW(cmd, cmdLen, L"rd /") ||
+         XdowsBehaviorContainsW(cmd, cmdLen, L"rd/") ||
+         XdowsBehaviorContainsW(cmd, cmdLen, L"rmdir /") ||
+         XdowsBehaviorContainsW(cmd, cmdLen, L"rmdir/"))) {
+        return XdowsSecurityBehaviorDestructiveDirectoryDelete;
+    }
+
+    //
+    // Rule 8: Ownership / ACL escalation tools. takeown and icacls are the
+    // standard post-exploitation pair for hijacking files and registry keys.
+    // Legitimate use is common enough that user mode gates on actor trust.
+    //
+    if (XdowsBehaviorContainsW(cmd, cmdLen, L"takeown") ||
+        XdowsBehaviorContainsW(cmd, cmdLen, L"icacls")) {
+        return XdowsSecurityBehaviorOwnershipEscalation;
+    }
+
+    //
+    // Rule 9: System-state control commands. shutdown and net user are
+    // frequently used by destructive actors (shutdown /r /t 0, net user
+    // attacker /add). User mode gates on actor trust; the kernel flags the
+    // command line and blocks the launch until a verdict arrives.
+    //
+    if (XdowsBehaviorContainsW(cmd, cmdLen, L"shutdown") ||
+        XdowsBehaviorContainsW(cmd, cmdLen, L"net user")) {
+        return XdowsSecurityBehaviorSystemControlCommand;
+    }
+
+    return XdowsSecurityBehaviorNone;
+}
+
+//
+// Classic document/browser exploit chain: a document viewer, browser, or
+// mail client parent spawning a script host child. Legitimate office and
+// browser applications never do this; every match is suspicious enough to
+// reach the user-decision path.
+//
+XDOWS_SECURITY_BEHAVIOR_TYPE
+XdowsBehaviorInspectParentChain(
+    _In_ ULONG ParentProcessId,
+    _In_ PCUNICODE_STRING ChildImageName
+    )
+{
+    static const PCSTR scriptHosts[] = {
+        "cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe",
+        "cscript.exe", "mshta.exe", "rundll32.exe", "regsvr32.exe"
+    };
+    static const PCSTR documentParents[] = {
+        "winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe",
+        "msedge.exe", "chrome.exe", "firefox.exe", "iexplore.exe",
+        "acrord32.exe", "wps.exe", "wpp.exe"
+    };
+    PEPROCESS parent = NULL;
+    PCSTR parentImage;
+    NTSTATUS status;
+    SIZE_T i;
+
+    if (ParentProcessId == 0 ||
+        ChildImageName == NULL ||
+        ChildImageName->Buffer == NULL) {
+        return XdowsSecurityBehaviorNone;
+    }
+
+    //
+    // First gate: the child must be a script host. This is a cheap leaf-name
+    // compare and filters out the vast majority of launches before any PID
+    // lookup.
+    //
+    for (i = 0; i < RTL_NUMBER_OF(scriptHosts); i++) {
+        if (XdowsBehaviorLeafNameEquals(ChildImageName, scriptHosts[i])) {
+            break;
+        }
+    }
+    if (i == RTL_NUMBER_OF(scriptHosts)) {
+        return XdowsSecurityBehaviorNone;
+    }
+
+    status = PsLookupProcessByProcessId(ULongToHandle(ParentProcessId), &parent);
+    if (!NT_SUCCESS(status) || parent == NULL) {
+        return XdowsSecurityBehaviorNone;
+    }
+
+    parentImage = PsGetProcessImageFileName(parent);
+    if (parentImage == NULL) {
+        ObDereferenceObject(parent);
+        return XdowsSecurityBehaviorNone;
+    }
+
+    for (i = 0; i < RTL_NUMBER_OF(documentParents); i++) {
+        if (XdowsBehaviorImageNameEquals(parentImage, documentParents[i])) {
+            ObDereferenceObject(parent);
+            return XdowsSecurityBehaviorParentProcessChain;
+        }
+    }
+
+    ObDereferenceObject(parent);
     return XdowsSecurityBehaviorNone;
 }
 
@@ -284,6 +504,13 @@ XdowsBehaviorTypeName(
     case XdowsSecurityBehaviorLolbinAbuse:       return L"LolbinAbuse";
     case XdowsSecurityBehaviorProcessInjection:  return L"ProcessInjection";
     case XdowsSecurityBehaviorThreadInjection:   return L"ThreadInjection";
+    case XdowsSecurityBehaviorParentProcessChain: return L"ParentProcessChain";
+    case XdowsSecurityBehaviorAutorunInf:         return L"AutorunInf";
+    case XdowsSecurityBehaviorProtectedProcessTerminate: return L"ProtectedProcessTerminate";
+    case XdowsSecurityBehaviorSensitiveProcessHandle:   return L"SensitiveProcessHandle";
+    case XdowsSecurityBehaviorDestructiveDirectoryDelete: return L"DestructiveDirectoryDelete";
+    case XdowsSecurityBehaviorOwnershipEscalation:  return L"OwnershipEscalation";
+    case XdowsSecurityBehaviorSystemControlCommand: return L"SystemControlCommand";
     default:                             return L"None";
     }
 }

@@ -33,6 +33,7 @@ Environment:
 #include "driver.h"
 #include "BehaviorRules.h"
 #include "CodeIntegrity.h"
+#include "selfprotect.h"
 #include <ntstrsafe.h>
 
 //
@@ -40,6 +41,17 @@ Environment:
 // include. Forward-declare it here; the function is exported by ntoskrnl.lib.
 //
 NTKERNELAPI PEPROCESS PsGetThreadProcess(_In_ PETHREAD Thread);
+
+//
+// PsLookupProcessByProcessId is declared in ntifs.h only; forward-declared
+// here like the other NT exports this file uses. Exported by ntoskrnl.lib.
+//
+NTKERNELAPI
+NTSTATUS
+PsLookupProcessByProcessId(
+    _In_ HANDLE ProcessId,
+    _Outptr_ PEPROCESS* Process
+    );
 
 //
 // SeLocateProcessImageName is likewise declared in ntifs.h only. It returns
@@ -80,6 +92,40 @@ PsGetProcessImageFileName(
 #ifndef PROCESS_DUP_HANDLE
 #define PROCESS_DUP_HANDLE 0x0040
 #endif
+#ifndef PROCESS_TERMINATE
+#define PROCESS_TERMINATE 0x0001
+#endif
+#ifndef PROCESS_TERMINATE
+#define PROCESS_TERMINATE 0x0001
+#endif
+
+//
+// Critical system processes that must never be injected into, torn open for
+// credential access, or terminated. These are the highest-value Windows
+// targets. The registered client and CI-trusted actors may still open them;
+// every other source is gated through user mode and the dangerous rights are
+// stripped on a Block verdict. Matched against the EPROCESS cached image
+// name (truncated to 15 chars), the same convention as the known-system-actor
+// gate below.
+//
+#define XDOWS_INJECTION_CRITICAL_PROCESS_COUNT 6u
+static const PCSTR XdowsInjectionCriticalProcesses[XDOWS_INJECTION_CRITICAL_PROCESS_COUNT] = {
+    "lsass.exe",
+    "csrss.exe",
+    "winlogon.exe",
+    "wininit.exe",
+    "services.exe",
+    "smss.exe"
+};
+#ifndef PROCESS_TERMINATE
+#define PROCESS_TERMINATE 0x0001
+#endif
+#ifndef PROCESS_VM_READ
+#define PROCESS_VM_READ 0x0010
+#endif
+#ifndef PROCESS_QUERY_LIMITED_INFORMATION
+#define PROCESS_QUERY_LIMITED_INFORMATION 0x1000
+#endif
 
 //
 // High-confidence injection primitives. Remote thread creation and remote
@@ -119,6 +165,13 @@ PsGetProcessImageFileName(
 // user mode is unresponsive.
 //
 #define XDOWS_INJECTION_CONSULT_TIMEOUT_MS    500u
+
+//
+// ResultCode sentinel set by user mode on a Block verdict to additionally
+// request the counter-kill of the acting process (in addition to stripping
+// the dangerous handle rights).
+//
+#define XDOWS_DECISION_RESULT_KILL_ACTOR      0x4B494C4Cu   // 'KILL'
 
 //
 // Short-lived Allow verdict cache. Only Allow is cached; Block/Timeout are
@@ -393,12 +446,19 @@ XdowsInjectionCopyActorImagePath(
 // Ask user-mode policy for a decision on the dangerous handle request.
 // Returns TRUE on Allow, FALSE on Block/Timeout/error.
 //
+// BehaviorTypeOverride: when non-None, emitted instead of the generic
+// ProcessInjection/ThreadInjection type. Used for the sensitive-process and
+// protected-process-terminate gates so user mode can route to the right
+// prompt and request an actor kill via Decision->ResultCode.
+//
 static
 BOOLEAN
 XdowsInjectionConsultUser(
     _In_ PCXDOWS_INJECTION_TARGET Target,
     _In_ ACCESS_MASK DesiredAccess,
     _In_ ULONG SourceProcessId,
+    _In_ XDOWS_SECURITY_BEHAVIOR_TYPE BehaviorTypeOverride,
+    _Out_opt_ PXDOWS_SECURITY_DECISION OutDecision,
     _Out_opt_ PULONGLONG EventId,
     _Out_opt_ PULONGLONG CorrelationId
     )
@@ -416,11 +476,14 @@ XdowsInjectionConsultUser(
     event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
     event.EventId = XdowsAllocateEventId();
     event.CorrelationId = event.EventId;
-    if (XdowsBehaviorProtectIsEnabled()) {
+    if (XdowsBehaviorProtectIsEnabled() ||
+        BehaviorTypeOverride != XdowsSecurityBehaviorNone) {
         event.EventType = XdowsSecurityEventBehavior;
-        event.BehaviorType = Target->EventType == XdowsSecurityEventProcessHandle
-            ? XdowsSecurityBehaviorProcessInjection
-            : XdowsSecurityBehaviorThreadInjection;
+        event.BehaviorType = (BehaviorTypeOverride != XdowsSecurityBehaviorNone)
+            ? BehaviorTypeOverride
+            : (Target->EventType == XdowsSecurityEventProcessHandle
+                ? XdowsSecurityBehaviorProcessInjection
+                : XdowsSecurityBehaviorThreadInjection);
         event.Flags = XdowsSecurityEventFlagUserModeRequired |
             XdowsSecurityEventFlagThreatConfirmed;
     } else {
@@ -471,6 +534,9 @@ XdowsInjectionConsultUser(
             L"Injection",
             L"Bridge failed or timed out; handle allowed (fail-open per R02)",
             status);
+        if (OutDecision != NULL) {
+            RtlCopyMemory(OutDecision, &decision, sizeof(*OutDecision));
+        }
         return TRUE;
     }
 
@@ -480,6 +546,9 @@ XdowsInjectionConsultUser(
     // Allow/Block/Timeout) we fail-open rather than stripping permissions,
     // which would otherwise break legitimate handle requests.
     //
+    if (OutDecision != NULL) {
+        RtlCopyMemory(OutDecision, &decision, sizeof(*OutDecision));
+    }
     return decision.Decision != XdowsSecurityDecisionBlock;
 }
 
@@ -620,6 +689,102 @@ XdowsInjectionLogSystemActorAllow(
         L"Known system actor handle request allowed (Beta fast-allow).");
 }
 
+//
+// True when the target process image is one of the critical system processes
+// that must never be injected into or torn open. Uses the EPROCESS cached
+// name; the list mirrors XdowsInjectionCriticalProcesses above.
+//
+static
+BOOLEAN
+XdowsInjectionIsCriticalTarget(
+    _In_ PEPROCESS TargetProcess
+    )
+{
+    PCSTR imageName;
+    SIZE_T i;
+
+    if (TargetProcess == NULL) {
+        return FALSE;
+    }
+
+    imageName = PsGetProcessImageFileName(TargetProcess);
+    if (imageName == NULL) {
+        return FALSE;
+    }
+
+    for (i = 0; i < XDOWS_INJECTION_CRITICAL_PROCESS_COUNT; i++) {
+        if (XdowsInjectionImageNameEquals(
+                imageName,
+                XdowsInjectionCriticalProcesses[i])) {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+//
+// Counter-kill: terminate the acting process that attempted a dangerous
+// handle request against a critical system process or a protected process,
+// after the user chose the "block and kill actor" verdict. The actor must
+// not be the registered client itself, another critical system process, or
+// PID <= 4 (System). Fails silently on any error; the handle strip in the
+// callback is the primary protection, the kill is best-effort follow-up.
+//
+static
+NTSTATUS
+XdowsInjectionKillActor(
+    _In_ ULONG ActorProcessId
+    )
+{
+    HANDLE processHandle = NULL;
+    PEPROCESS actorProcess = NULL;
+    OBJECT_ATTRIBUTES objectAttributes;
+    CLIENT_ID clientId;
+    NTSTATUS status;
+
+    if (ActorProcessId == 0 ||
+        ActorProcessId <= 4 ||
+        ActorProcessId == HandleToULong(g_XdowsDriverContext.ClientProcessId) ||
+        XdowsSelfProtectIsProcessProtected(ULongToHandle(ActorProcessId))) {
+        return STATUS_ACCESS_DENIED;
+    }
+
+    status = PsLookupProcessByProcessId(ULongToHandle(ActorProcessId), &actorProcess);
+    if (!NT_SUCCESS(status) || actorProcess == NULL) {
+        return status;
+    }
+
+    if (XdowsInjectionIsCriticalTarget(actorProcess)) {
+        ObDereferenceObject(actorProcess);
+        return STATUS_ACCESS_DENIED;
+    }
+
+    RtlZeroMemory(&clientId, sizeof(clientId));
+    clientId.UniqueProcess = ULongToHandle(ActorProcessId);
+    RtlZeroMemory(&objectAttributes, sizeof(objectAttributes));
+    InitializeObjectAttributes(
+        &objectAttributes,
+        NULL,
+        OBJ_KERNEL_HANDLE,
+        NULL,
+        NULL);
+
+    status = ZwOpenProcess(
+        &processHandle,
+        PROCESS_TERMINATE,
+        &objectAttributes,
+        &clientId);
+    ObDereferenceObject(actorProcess);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = ZwTerminateProcess(processHandle, STATUS_VIRUS_INFECTED);
+    ZwClose(processHandle);
+    return status;
+}
+
 static
 OB_PREOP_CALLBACK_STATUS
 XdowsInjectionPreOperation(
@@ -675,6 +840,59 @@ XdowsInjectionPreOperation(
     sourcePid = HandleToULong(callerProcessId);
 
     //
+    // Protected-process terminate gate. Runs BEFORE the CI/known-system-actor
+    // fast-allow gates: no signed system component legitimately terminates
+    // the protected Xdows Security process, and the AV-killer primitive is
+    // exactly a signed or system-looking binary holding PROCESS_TERMINATE.
+    // The registered client is already exempted by the fast exit above.
+    // Consult user mode; on anything but an explicit Allow, strip the right
+    // and optionally counter-kill the actor.
+    //
+    if (target.EventType == XdowsSecurityEventProcessHandle &&
+        (requestedMask & PROCESS_TERMINATE) &&
+        XdowsSelfProtectIsProcessProtected(target.TargetProcessId)) {
+        XDOWS_SECURITY_DECISION decision;
+        BOOLEAN allowed;
+
+        RtlZeroMemory(&decision, sizeof(decision));
+        allowed = XdowsInjectionConsultUser(
+            &target,
+            PROCESS_TERMINATE,
+            sourcePid,
+            XdowsSecurityBehaviorProtectedProcessTerminate,
+            &decision,
+            &eventId,
+            &correlationId);
+
+        //
+        // Fail-CLOSED for protected-process terminate: strip unless the
+        // user explicitly allowed. A kernel or user timeout must not hand a
+        // PROCESS_TERMINATE right to an unknown actor.
+        //
+        if (!allowed || decision.Decision != XdowsSecurityDecisionAllow) {
+            *desiredAccess &= ~PROCESS_TERMINATE;
+            XdowsLogWrite(
+                XdowsSecurityLogWarning,
+                eventId,
+                correlationId,
+                L"SelfProtect",
+                L"Protected process terminate request denied; rights stripped.");
+
+            if (decision.ResultCode == XDOWS_DECISION_RESULT_KILL_ACTOR) {
+                NTSTATUS killStatus = XdowsInjectionKillActor(sourcePid);
+                XdowsLogWriteStatus(
+                    XdowsSecurityLogWarning,
+                    eventId,
+                    correlationId,
+                    L"SelfProtect",
+                    L"Protected-process terminate actor counter-kill",
+                    killStatus);
+            }
+        }
+        return OB_PREOP_SUCCESS;
+    }
+
+    //
     // ci.dll validation is performed asynchronously outside this Ob callback
     // because normal kernel APCs are disabled here. A trusted cached signer
     // verdict suppresses the noisy user-mode path; unknown and unsigned
@@ -701,6 +919,53 @@ XdowsInjectionPreOperation(
     }
 
     //
+    // Sensitive-process handle gate. Opening a critical system process
+    // (lsass, csrss, winlogon, ...) for a dangerous right is the classic
+    // credential-theft / injection primitive. Consult user mode; on anything
+    // but an explicit Allow, strip the dangerous rights and optionally kill
+    // the actor.
+    //
+    if (target.EventType == XdowsSecurityEventProcessHandle &&
+        XdowsInjectionIsCriticalTarget(
+            (PEPROCESS)Info->Object) &&
+        effectiveDangerous != 0) {
+        XDOWS_SECURITY_DECISION decision;
+        BOOLEAN allowed;
+
+        RtlZeroMemory(&decision, sizeof(decision));
+        allowed = XdowsInjectionConsultUser(
+            &target,
+            effectiveDangerous,
+            sourcePid,
+            XdowsSecurityBehaviorSensitiveProcessHandle,
+            &decision,
+            &eventId,
+            &correlationId);
+
+        if (!allowed || decision.Decision != XdowsSecurityDecisionAllow) {
+            *desiredAccess &= ~threatMask;
+            XdowsLogWrite(
+                XdowsSecurityLogWarning,
+                eventId,
+                correlationId,
+                L"Injection",
+                L"Sensitive system-process handle rights stripped.");
+
+            if (decision.ResultCode == XDOWS_DECISION_RESULT_KILL_ACTOR) {
+                NTSTATUS killStatus = XdowsInjectionKillActor(sourcePid);
+                XdowsLogWriteStatus(
+                    XdowsSecurityLogWarning,
+                    eventId,
+                    correlationId,
+                    L"Injection",
+                    L"Sensitive-process handle actor counter-kill",
+                    killStatus);
+            }
+        }
+        return OB_PREOP_SUCCESS;
+    }
+
+    //
     // Cache hit: skip user-mode consultation for repeated allow requests.
     //
     if (XdowsInjectionLookupVerdict(
@@ -715,6 +980,8 @@ XdowsInjectionPreOperation(
             &target,
             effectiveDangerous,
             sourcePid,
+            XdowsSecurityBehaviorNone,
+            NULL,
             &eventId,
             &correlationId)) {
         XdowsInjectionRecordVerdict(

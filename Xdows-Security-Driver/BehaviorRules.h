@@ -60,6 +60,22 @@ XdowsBehaviorInspectCommandLine(
     );
 
 //
+// Inspect a process-launch parent/child chain for the classic document or
+// browser exploit pattern: a document viewer / browser / email client parent
+// spawning a script host child (cmd, powershell, wscript, mshta, rundll32).
+//
+// ParentProcessId must be the PID of the acting parent. The child image name
+// is matched case-insensitively against the script-host allowlist. Returns
+// XdowsSecurityBehaviorParentProcessChain on a match, else None. Safe at
+// PASSIVE_LEVEL; performs a bounded PID->image lookup.
+//
+XDOWS_SECURITY_BEHAVIOR_TYPE
+XdowsBehaviorInspectParentChain(
+    _In_ ULONG ParentProcessId,
+    _In_ PCUNICODE_STRING ChildImageName
+    );
+
+//
 // Convert a behavior type to a human-readable wide string for logging.
 //
 PCWSTR

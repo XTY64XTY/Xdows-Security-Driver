@@ -160,7 +160,45 @@ typedef enum _XDOWS_SECURITY_BEHAVIOR_TYPE {
     XdowsSecurityBehaviorDownloadExecute = 5,
     XdowsSecurityBehaviorLolbinAbuse = 6,
     XdowsSecurityBehaviorProcessInjection = 7,
-    XdowsSecurityBehaviorThreadInjection = 8
+    XdowsSecurityBehaviorThreadInjection = 8,
+    //
+    // Office/PDF/browser document opened by an application that spawns a
+    // script host (cmd/powershell/wscript/rundll32). Classic exploit chain.
+    //
+    XdowsSecurityBehaviorParentProcessChain = 9,
+    //
+    // autorun.inf creation on a removable/media volume. Kernel emits a
+    // FileCreate event flagged AutorunInf so user mode can hold for an
+    // explicit allow/block decision (fail-closed on timeout).
+    //
+    XdowsSecurityBehaviorAutorunInf = 10,
+    //
+    // A handle request for PROCESS_TERMINATE against a protected process.
+    // Kernel strips the right; on repeated attempts it may kill the actor.
+    //
+    XdowsSecurityBehaviorProtectedProcessTerminate = 11,
+    //
+    // A handle request for dangerous rights (VM_WRITE/CREATE_THREAD/...) against
+    // a critical system process (lsass, csrss, winlogon, ...). Kernel consults
+    // user mode for an allow/strip decision and may kill the actor.
+    //
+    XdowsSecurityBehaviorSensitiveProcessHandle = 12,
+    //
+    // Recursive directory deletion (rd/rmdir /s /q) targeting a location
+    // with more than 500 files. Kernel flags the command line; user mode
+    // counts the target and prompts.
+    //
+    XdowsSecurityBehaviorDestructiveDirectoryDelete = 13,
+    //
+    // Ownership / ACL escalation tools: takeown, icacls. Legitimate admin
+    // commands, but prime post-exploitation primitives.
+    //
+    XdowsSecurityBehaviorOwnershipEscalation = 14,
+    //
+    // System-state control commands: shutdown, net user. Legitimate admin
+    // commands, but prime destructive post-exploitation primitives.
+    //
+    XdowsSecurityBehaviorSystemControlCommand = 15
 } XDOWS_SECURITY_BEHAVIOR_TYPE;
 
 typedef enum _XDOWS_SECURITY_DECISION_TYPE {
@@ -182,7 +220,8 @@ typedef enum _XDOWS_SECURITY_EVENT_FLAGS {
     XdowsSecurityEventFlagNone = 0x00000000u,
     XdowsSecurityEventFlagFileOpenNameAvailable = 0x00000001u,
     XdowsSecurityEventFlagUserModeRequired = 0x00000002u,
-    XdowsSecurityEventFlagThreatConfirmed = 0x00000004u
+    XdowsSecurityEventFlagThreatConfirmed = 0x00000004u,
+    XdowsSecurityEventFlagAutorunInf = 0x00000008u
 } XDOWS_SECURITY_EVENT_FLAGS;
 
 typedef enum _XDOWS_SECURITY_LOG_SEVERITY {

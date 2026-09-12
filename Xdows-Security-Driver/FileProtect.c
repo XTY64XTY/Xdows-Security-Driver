@@ -36,6 +36,7 @@ Environment:
 #include "driver.h"
 #include "RansomwareMonitor.h"
 #include "selfprotect.h"
+#include "codeintegrity.h"
 #include <ntstrsafe.h>
 
 //
@@ -103,6 +104,13 @@ NTSTATUS
 XdowsFileAcquireName(
     _In_ PFLT_CALLBACK_DATA Data,
     _Outptr_result_maybenull_ PFLT_FILE_NAME_INFORMATION* NameInfo
+    );
+
+static
+BOOLEAN
+XdowsFileLeafNameEquals(
+    _In_ PCUNICODE_STRING Path,
+    _In_ PCWSTR Leaf
     );
 
 static
@@ -185,6 +193,178 @@ XdowsFileConsultBootPolicy(
         XDOWS_SECURITY_MAX_PATH_CHARS,
         Path);
     return XdowsQueueEventAndWait(&event, Decision);
+}
+
+//
+// Critical system DLL read-only protection. A fixed allowlist of core
+// System32 libraries must never be replaced or renamed by an untrusted
+// actor. Only CI-trusted processes (or the registered client itself) may
+// mutate them; any other actor is denied synchronously in the minifilter
+// without a user-mode round trip. This is a pure kernel denial, so it never
+// consumes bridge events or main-program memory.
+//
+typedef struct _XDOWS_CRITICAL_DLL {
+    PCWSTR LeafName;
+} XDOWS_CRITICAL_DLL, *PXDOWS_CRITICAL_DLL;
+
+static const XDOWS_CRITICAL_DLL XdowsCriticalDlls[] = {
+    { L"ntdll.dll"  },
+    { L"kernel32.dll" },
+    { L"kernelbase.dll" },
+    { L"win32u.dll"   },
+    { L"user32.dll"  },
+    { L"gdi32.dll"   },
+    { L"advapi32.dll" },
+    { L"ntoskrnl.exe" },
+    { L"hal.dll"     }
+};
+
+static
+BOOLEAN
+XdowsFileLeafNameEquals(
+    _In_ PCUNICODE_STRING Path,
+    _In_ PCWSTR Leaf
+    )
+{
+    SIZE_T pathLen;
+    SIZE_T leafLen;
+
+    if (Path == NULL || Path->Buffer == NULL || Path->Length == 0 || Leaf == NULL) {
+        return FALSE;
+    }
+
+    leafLen = wcslen(Leaf);
+    if (leafLen == 0) {
+        return FALSE;
+    }
+
+    pathLen = Path->Length / sizeof(WCHAR);
+    if (pathLen < leafLen) {
+        return FALSE;
+    }
+
+    return _wcsicmp(Path->Buffer + (pathLen - leafLen), Leaf) == 0;
+}
+
+static
+BOOLEAN
+XdowsFileIsCriticalSystemLibrary(
+    _In_ PCUNICODE_STRING Path
+    )
+{
+    SIZE_T i;
+
+    for (i = 0; i < RTL_NUMBER_OF(XdowsCriticalDlls); i++) {
+        if (XdowsFileLeafNameEquals(Path, XdowsCriticalDlls[i].LeafName)) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+//
+// A process is a trusted system component if its image carries a CI-signed
+// verdict, or it is the registered Xdows Security client itself (which needs
+// to write these DLLs for repairs).
+//
+static
+BOOLEAN
+XdowsFileActorMayMutateCriticalDll(
+    _In_ HANDLE RequestorProcessId
+    )
+{
+    BOOLEAN sourceTrusted = FALSE;
+    BOOLEAN signatureKnown;
+
+    if (RequestorProcessId == NULL) {
+        return FALSE;
+    }
+    if (RequestorProcessId == g_XdowsDriverContext.ClientProcessId) {
+        return TRUE;
+    }
+
+    signatureKnown = XdowsCodeIntegrityQueryProcessTrust(
+        PsGetCurrentProcess(),
+        &sourceTrusted);
+    return signatureKnown && sourceTrusted;
+}
+
+//
+// autorun.inf interception. A create/write of autorun.inf on any volume is
+// the classic USB autorun infection vector. The kernel consults user mode for
+// an explicit allow/block decision and fails CLOSED on timeout (a pending
+// autorun prompt must not silently allow the write).
+//
+static
+NTSTATUS
+XdowsFileConsultAutorunPolicy(
+    _In_ PCUNICODE_STRING Path,
+    _In_ ULONG OriginatorPid,
+    _Out_ PXDOWS_SECURITY_DECISION Decision
+    )
+{
+    XDOWS_SECURITY_EVENT event;
+
+    RtlZeroMemory(&event, sizeof(event));
+    event.Header.Size = sizeof(event);
+    event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
+    event.EventId = XdowsAllocateEventId();
+    event.CorrelationId = event.EventId;
+    event.EventType = XdowsSecurityEventBehavior;
+    event.BehaviorType = XdowsSecurityBehaviorAutorunInf;
+    event.Flags = XdowsSecurityEventFlagUserModeRequired |
+        XdowsSecurityEventFlagThreatConfirmed |
+        XdowsSecurityEventFlagFileOpenNameAvailable |
+        XdowsSecurityEventFlagAutorunInf;
+    event.ProcessId = OriginatorPid;
+    event.CreatingProcessId = HandleToULong(PsGetCurrentProcessId());
+    event.KernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
+    XdowsFileCopyNameInto(
+        event.ImagePath,
+        XDOWS_SECURITY_MAX_PATH_CHARS,
+        Path);
+    return XdowsQueueEventAndWait(&event, Decision);
+}
+
+//
+// TRUE if an autorun.inf write must be rejected. Blocks on a Block verdict
+// or any bridge failure / timeout (fail-closed).
+//
+static
+BOOLEAN
+XdowsFileAutorunMutationMustBeBlocked(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCUNICODE_STRING Path
+    )
+{
+    XDOWS_SECURITY_DECISION decision;
+    NTSTATUS status;
+
+    RtlZeroMemory(&decision, sizeof(decision));
+    if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+        status = STATUS_INVALID_DEVICE_STATE;
+    } else {
+        status = XdowsFileConsultAutorunPolicy(
+            Path,
+            HandleToULong(FltGetRequestorProcessIdEx(Data)),
+            &decision);
+    }
+
+    if (NT_SUCCESS(status) &&
+        decision.Decision == XdowsSecurityDecisionAllow) {
+        return FALSE;
+    }
+
+    XdowsLogWriteStatus(
+        XdowsSecurityLogWarning,
+        decision.EventId,
+        decision.EventId,
+        L"Autorun",
+        L"autorun.inf creation/write blocked",
+        status);
+    Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+    Data->IoStatus.Information = 0;
+    return TRUE;
 }
 
 static
@@ -696,6 +876,37 @@ XdowsFilePreCreate(
             return FLT_PREOP_SUCCESS_WITH_CALLBACK;
         }
 
+        //
+        // Critical system DLL read-only protection. A write-open against a
+        // core System32 library by an untrusted actor is denied synchronously.
+        // This is a pure kernel denial (no bridge event, no user-mode round
+        // trip), so it consumes no main-program memory.
+        //
+        if (XdowsFileIsCriticalSystemLibrary(&name->Name) &&
+            !XdowsFileActorMayMutateCriticalDll(
+                FltGetRequestorProcessIdEx(Data))) {
+            XdowsLogWrite(
+                XdowsSecurityLogWarning,
+                0,
+                0,
+                L"SelfProtect",
+                L"Critical system library mutation by untrusted actor denied.");
+            Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+            Data->IoStatus.Information = 0;
+            FltReleaseFileNameInformation(name);
+            return FLT_PREOP_COMPLETE;
+        }
+
+        //
+        // autorun.inf interception. The kernel consults user mode for an
+        // explicit allow/block decision and fails closed on timeout.
+        //
+        if (XdowsFileLeafNameEquals(&name->Name, L"autorun.inf") &&
+            XdowsFileAutorunMutationMustBeBlocked(Data, &name->Name)) {
+            FltReleaseFileNameInformation(name);
+            return FLT_PREOP_COMPLETE;
+        }
+
         if (!XdowsFileIsScannablePath(&name->Name)) {
             FltReleaseFileNameInformation(name);
             return FLT_PREOP_SUCCESS_NO_CALLBACK;
@@ -1049,6 +1260,27 @@ XdowsFilePreSetInformation(
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
+    //
+    // Critical system DLL rename/link protection. Renaming a core System32
+    // library over itself or into a new name is a classic rootkit/evasion
+    // primitive. Deny it synchronously unless the actor is a trusted system
+    // component or the registered client.
+    //
+    if (XdowsFileIsCriticalSystemLibrary(&name->Name) &&
+        !XdowsFileActorMayMutateCriticalDll(
+            FltGetRequestorProcessIdEx(Data))) {
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            0,
+            0,
+            L"SelfProtect",
+            L"Critical system library rename by untrusted actor denied.");
+        Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+        Data->IoStatus.Information = 0;
+        FltReleaseFileNameInformation(name);
+        return FLT_PREOP_COMPLETE;
+    }
+
     if (XdowsFileIsDeleteDispositionClass(informationClass)) {
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
@@ -1114,6 +1346,26 @@ XdowsFilePreSetInformation(
         FltReleaseFileNameInformation(destinationName);
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    //
+    // Renaming a file TO a critical system library name (overwriting the
+    // original DLL) is equally destructive. Guard the destination leaf too.
+    //
+    if (XdowsFileIsCriticalSystemLibrary(&destinationName->Name) &&
+        !XdowsFileActorMayMutateCriticalDll(
+            FltGetRequestorProcessIdEx(Data))) {
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            0,
+            0,
+            L"SelfProtect",
+            L"Critical system library rename destination denied.");
+        Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+        Data->IoStatus.Information = 0;
+        FltReleaseFileNameInformation(destinationName);
+        FltReleaseFileNameInformation(name);
+        return FLT_PREOP_COMPLETE;
     }
 
     if (!XdowsFileIsScannablePath(&name->Name) &&

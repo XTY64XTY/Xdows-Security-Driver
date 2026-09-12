@@ -198,10 +198,12 @@ XdowsProcessApplyBehaviorPolicy(
     )
 {
     UNICODE_STRING commandLine;
+    UNICODE_STRING childImage;
     XDOWS_SECURITY_BEHAVIOR_TYPE behavior;
     XDOWS_SECURITY_DECISION decision;
     NTSTATUS status;
     BOOLEAN infrastructureFailure;
+    BOOLEAN failOpenOnInfrastructureFailure;
 
     if (!XdowsBehaviorProtectIsEnabled()) {
         return FALSE;
@@ -215,8 +217,36 @@ XdowsProcessApplyBehaviorPolicy(
 
     behavior = XdowsBehaviorInspectCommandLine(&commandLine);
     if (behavior == XdowsSecurityBehaviorNone) {
-        return FALSE;
+        //
+        // Parent-process-chain rule: a document viewer / browser / mail
+        // client parent spawning a script host child. Checked only after the
+        // command-line rules miss so the common case stays on the fast path.
+        //
+        RtlInitEmptyUnicodeString(
+            &childImage,
+            Event->ImagePath,
+            XDOWS_SECURITY_MAX_PATH_CHARS * sizeof(WCHAR));
+        childImage.Length = (USHORT)(wcslen(Event->ImagePath) * sizeof(WCHAR));
+
+        behavior = XdowsBehaviorInspectParentChain(
+            Event->ParentProcessId,
+            &childImage);
+        if (behavior == XdowsSecurityBehaviorNone) {
+            return FALSE;
+        }
     }
+
+    //
+    // The ownership/ACL and system-state command rules flag legitimate admin
+    // commands (takeown, icacls, shutdown, net user, rd /s /q). When the
+    // user-mode bridge is unavailable these must fail OPEN: blocking every
+    // shutdown while the scanner is down would break the system. The
+    // parent-chain rule stays fail-CLOSED (confirmed exploit chain).
+    //
+    failOpenOnInfrastructureFailure =
+        behavior == XdowsSecurityBehaviorOwnershipEscalation ||
+        behavior == XdowsSecurityBehaviorSystemControlCommand ||
+        behavior == XdowsSecurityBehaviorDestructiveDirectoryDelete;
 
     Event->EventType = XdowsSecurityEventBehavior;
     Event->BehaviorType = (ULONG)behavior;
@@ -234,7 +264,15 @@ XdowsProcessApplyBehaviorPolicy(
         decision.Decision == XdowsSecurityDecisionTimeout;
 
     if (infrastructureFailure) {
-        if (behavior != XdowsSecurityBehaviorPolicyBypass) {
+        if (failOpenOnInfrastructureFailure) {
+            XdowsLogWriteStatus(
+                XdowsSecurityLogWarning,
+                Event->EventId,
+                Event->CorrelationId,
+                L"Behavior",
+                L"Command flagged but allowed because user decision infrastructure was unavailable",
+                status);
+        } else {
             CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
             XdowsLogWriteStatus(
                 XdowsSecurityLogWarning,
@@ -242,14 +280,6 @@ XdowsProcessApplyBehaviorPolicy(
                 Event->CorrelationId,
                 L"Behavior",
                 L"Confirmed behavior blocked because user decision was unavailable",
-                status);
-        } else {
-            XdowsLogWriteStatus(
-                XdowsSecurityLogWarning,
-                Event->EventId,
-                Event->CorrelationId,
-                L"Behavior",
-                L"Policy bypass allowed because user decision infrastructure was unavailable",
                 status);
         }
         return TRUE;
