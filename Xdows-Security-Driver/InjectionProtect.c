@@ -167,12 +167,10 @@ static const PCSTR XdowsInjectionCriticalProcesses[XDOWS_INJECTION_CRITICAL_PROC
 #define XDOWS_INJECTION_CONSULT_TIMEOUT_MS    500u
 
 //
-// ResultCode sentinel set by user mode on a Block verdict to additionally
-// request the counter-kill of the acting process (in addition to stripping
-// the dangerous handle rights).
+// XDOWS_DECISION_RESULT_KILL_ACTOR (the ResultCode sentinel that asks the
+// driver to counter-kill the acting process) is defined once in Public.h so
+// the injection, handle, and registry gates all decode the same value.
 //
-#define XDOWS_DECISION_RESULT_KILL_ACTOR      0x4B494C4Cu   // 'KILL'
-
 //
 // Short-lived Allow verdict cache. Only Allow is cached; Block/Timeout are
 // not. The cache key includes the target process creation time to resist PID
@@ -731,7 +729,9 @@ XdowsInjectionIsCriticalTarget(
 // PID <= 4 (System). Fails silently on any error; the handle strip in the
 // callback is the primary protection, the kill is best-effort follow-up.
 //
-static
+// Shared with the registry gate (RegistryProtect.c), which escalates a
+// confirmed Block on a critical persistence key to the same counter-kill.
+//
 NTSTATUS
 XdowsInjectionKillActor(
     _In_ ULONG ActorProcessId

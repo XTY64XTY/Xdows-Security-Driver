@@ -80,6 +80,17 @@ Environment:
 #define XDOWS_SECURITY_MAX_REGISTRY_PATH_CHARS 260u
 #define XDOWS_SECURITY_MAX_REGISTRY_VALUE_CHARS 260u
 
+//
+// ResultCode sentinel set by user mode on a Block verdict to additionally
+// request that the driver counter-terminate the acting process. Honoured by
+// the injection/handle gates and by the registry gate for critical
+// persistence keys. Mirrored by DriverProtocol.KillActorResultCode in the
+// main app repository. The safety guards (never the registered client, a
+// critical system process, a self-protected process, or PID <= 4) are
+// enforced kernel-side, so a stray sentinel cannot be abused.
+//
+#define XDOWS_DECISION_RESULT_KILL_ACTOR 0x4B494C4Cu
+
 #define XDOWS_SECURITY_DEVICE_NAME L"\\Device\\XdowsSecurityDriver"
 #define XDOWS_SECURITY_SYMBOLIC_NAME L"\\DosDevices\\Global\\XdowsSecurityDriver"
 #define XDOWS_SECURITY_LEGACY_SYMBOLIC_NAME L"\\DosDevices\\XdowsSecurityDriver"

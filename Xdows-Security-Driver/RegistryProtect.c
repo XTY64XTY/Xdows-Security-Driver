@@ -22,6 +22,7 @@ Environment:
 #include "codeintegrity.h"
 #include "registryprotect.h"
 #include "selfprotect.h"
+#include "InjectionProtect.h"
 #include <ntstrsafe.h>
 
 #define XDOWS_REGISTRY_ALTITUDE L"370031.12"
@@ -318,6 +319,27 @@ XdowsRegistryDecideMutation(
         L"RegistryProtect",
         L"Protected registry mutation denied",
         status);
+
+    //
+    // Escalation: a confirmed Block on a critical persistence key (safe-mode
+    // autostart, boot-execute configuration, or a critical policy value) is a
+    // hostile act that survives reboot. User mode sets the kill sentinel on
+    // the decision for exactly those keys; the shared kill helper refuses to
+    // touch the client, critical system processes, self-protected processes,
+    // and PID <= 4. The verdict itself is never downgraded: the mutation is
+    // denied regardless of whether the kill succeeds.
+    //
+    if (decision.ResultCode == XDOWS_DECISION_RESULT_KILL_ACTOR) {
+        NTSTATUS killStatus = XdowsInjectionKillActor(processId);
+        XdowsLogWriteStatus(
+            XdowsSecurityLogWarning,
+            event.EventId,
+            event.CorrelationId,
+            L"RegistryProtect",
+            L"Critical registry mutation actor counter-kill",
+            killStatus);
+    }
+
     return STATUS_ACCESS_DENIED;
 }
 
