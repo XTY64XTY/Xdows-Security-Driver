@@ -40,6 +40,16 @@ EXTERN_C_START
 #define XDOWS_RANSOM_MAX_TRACKED_PIDS  64u
 
 //
+// System-directory dimension (script-host mass delete under \Windows\).
+// The threshold is deliberately much looser than the user-data threshold:
+// Windows\ carries far more legitimate churn (servicing, component store
+// cleanup) than user folders, but a *script host* crossing 50 destructive
+// opens inside 3 seconds under the OS directory is a wipe, not churn.
+//
+#define XDOWS_RANSOM_SYS_WINDOW_MS         3000u
+#define XDOWS_RANSOM_SYS_FILE_THRESHOLD    50u
+
+//
 // Initialize the monitor. Must be called exactly once at driver start.
 //
 VOID
@@ -76,7 +86,22 @@ XdowsRansomwareMonitorIsFlagged(
     );
 
 //
-// Clear the tracking state for a process (e.g. on process exit).
+// Record a destructive open (DELETE access) issued by a script host against
+// a file under the Windows directory, and return TRUE when the process has
+// crossed the system-directory threshold within the system window. The
+// caller has already established that the requestor is a script host; this
+// function re-checks the \Windows\ path condition and returns FALSE without
+// recording when the target is elsewhere.
+//
+BOOLEAN
+XdowsRansomwareMonitorRecordSystemDelete(
+    _In_ ULONG OriginatorPid,
+    _In_opt_ PCUNICODE_STRING Path
+    );
+
+//
+// Clear the tracking state for a process (e.g. on process exit). Clears
+// both the user-data and the system-directory slot tables.
 //
 VOID
 XdowsRansomwareMonitorResetProcess(

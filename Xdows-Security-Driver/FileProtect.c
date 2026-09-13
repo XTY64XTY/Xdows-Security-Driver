@@ -35,6 +35,7 @@ Environment:
 #include <fltKernel.h>
 #include "driver.h"
 #include "RansomwareMonitor.h"
+#include "BehaviorRules.h"
 #include "selfprotect.h"
 #include "codeintegrity.h"
 #include <ntstrsafe.h>
@@ -46,6 +47,19 @@ Environment:
 #ifndef STATUS_VIRUS_INFECTED
 #define STATUS_VIRUS_INFECTED ((NTSTATUS)0xC0000222L)
 #endif
+
+//
+// PsGetProcessImageFileName is declared in ntifs.h only. Returns the cached
+// image name (truncated to 15 chars, not guaranteed null-terminated) of a
+// process; used to identify script hosts for the system-directory ransomware
+// dimension. Exported by ntoskrnl.lib.
+//
+NTKERNELAPI
+PCHAR
+PsGetProcessImageFileName(
+    _In_ PEPROCESS Process
+    );
+
 
 //
 // Files larger than this are not submitted for post-cleanup write scanning:
@@ -287,6 +301,105 @@ XdowsFileActorMayMutateCriticalDll(
         PsGetCurrentProcess(),
         &sourceTrusted);
     return signatureKnown && sourceTrusted;
+}
+
+//
+// System-binary masquerade interception. Malware habitually drops its
+// payload under the name of a trusted Windows binary (svchost.exe,
+// rundll32.exe, lsass.exe, ...) into a user-writable directory so that a
+// casual process-name inspection shows "svchost.exe running". A real copy
+// of these binaries only ever lives under %SystemRoot% (which unprivileged
+// processes cannot write), so their appearance under AppData, Downloads,
+// Desktop, or ProgramData is hostile by definition.
+//
+// This is a pure kernel denial: STATUS_ACCESS_DENIED in PreCreate, no
+// bridge event, no user-mode round trip. CI-trusted processes and the
+// registered client are exempt (the same gate used for critical system
+// libraries), so Windows servicing and Xdows repairs keep working.
+//
+static const PCWSTR XdowsMasqueradeLeafNames[] = {
+    L"svchost.exe",   L"rundll32.exe",  L"regsvr32.exe", L"dllhost.exe",
+    L"dllhst3g.exe",  L"lsass.exe",     L"csrss.exe",    L"smss.exe",
+    L"winlogon.exe",  L"wininit.exe",   L"services.exe", L"spoolsv.exe",
+    L"taskhostw.exe", L"conhost.exe",   L"dwm.exe"
+};
+
+//
+// TRUE if the normalized path contains the given directory segment bounded
+// by backslashes (so "\AppData\" matches but "\MyAppDataFiles\" does not).
+// The path comes from FltParseFileNameInformation and is not guaranteed to
+// be null-terminated, so every access is bounds-checked against Length.
+//
+static
+BOOLEAN
+XdowsFilePathContainsSegment(
+    _In_ PCUNICODE_STRING Path,
+    _In_ PCWSTR Segment
+    )
+{
+    SIZE_T pathLen;
+    SIZE_T segmentLen;
+    SIZE_T i;
+
+    if (Path == NULL || Path->Buffer == NULL || Segment == NULL) {
+        return FALSE;
+    }
+
+    pathLen = Path->Length / sizeof(WCHAR);
+    segmentLen = wcslen(Segment);
+    if (segmentLen == 0 || pathLen < segmentLen + 2) {
+        return FALSE;
+    }
+
+    for (i = 0; i + segmentLen + 1 < pathLen; i++) {
+        if (Path->Buffer[i] != L'\\') {
+            continue;
+        }
+        if (_wcsnicmp(Path->Buffer + i + 1, Segment, segmentLen) == 0 &&
+            Path->Buffer[i + 1 + segmentLen] == L'\\') {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+//
+// User-writable locations where a masqueraded system binary has no
+// legitimate reason to appear. Covers per-user AppData (all three
+// subtrees), Downloads, Desktop (including OneDrive-redirected desktops,
+// which still carry a \Desktop\ segment), and the machine-wide
+// ProgramData drop zone.
+//
+static
+BOOLEAN
+XdowsFileIsUserWritableLocation(
+    _In_ PCUNICODE_STRING Path
+    )
+{
+    return XdowsFilePathContainsSegment(Path, L"AppData") ||
+        XdowsFilePathContainsSegment(Path, L"Downloads") ||
+        XdowsFilePathContainsSegment(Path, L"Desktop") ||
+        XdowsFilePathContainsSegment(Path, L"ProgramData");
+}
+
+static
+BOOLEAN
+XdowsFileIsMasqueradedSystemBinary(
+    _In_ PCUNICODE_STRING Path
+    )
+{
+    ULONG i;
+
+    if (!XdowsFileIsUserWritableLocation(Path)) {
+        return FALSE;
+    }
+
+    for (i = 0; i < RTL_NUMBER_OF(XdowsMasqueradeLeafNames); i++) {
+        if (XdowsFileLeafNameEquals(Path, XdowsMasqueradeLeafNames[i])) {
+            return TRUE;
+        }
+    }
+    return FALSE;
 }
 
 //
@@ -898,6 +1011,27 @@ XdowsFilePreCreate(
         }
 
         //
+        // System-binary masquerade interception. A write-open that creates
+        // or replaces a Windows system-binary name inside a user-writable
+        // directory is denied synchronously by the kernel. Pure denial: no
+        // bridge event, no user-mode round trip.
+        //
+        if (XdowsFileIsMasqueradedSystemBinary(&name->Name) &&
+            !XdowsFileActorMayMutateCriticalDll(
+                FltGetRequestorProcessIdEx(Data))) {
+            XdowsLogWrite(
+                XdowsSecurityLogWarning,
+                0,
+                0,
+                L"File",
+                L"System-binary masquerade in user-writable directory denied.");
+            Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+            Data->IoStatus.Information = 0;
+            FltReleaseFileNameInformation(name);
+            return FLT_PREOP_COMPLETE;
+        }
+
+        //
         // autorun.inf interception. The kernel consults user mode for an
         // explicit allow/block decision and fails closed on timeout.
         //
@@ -936,6 +1070,29 @@ XdowsFilePreCreate(
         if (isWriteOpen && name != NULL) {
             ransomBlock = XdowsRansomwareMonitorRecordWrite(
                 originatorPid, &name->Name);
+
+            //
+            // System-directory ransomware dimension: a script host holding
+            // DELETE access against files under \Windows\ in bursts is the
+            // wipe primitive (mass deletion of the OS directory). Only the
+            // interpreter identity discriminates here -- the interpreter
+            // binary itself is always legitimately signed, so the CI gate
+            // must NOT be applied to this dimension. The monitor owns the
+            // path rule and the 50-opens-in-3-seconds threshold; this call
+            // site only establishes the script-host and DELETE conditions.
+            //
+            if (!ransomBlock &&
+                FlagOn(Data->Iopb->Parameters.Create.SecurityContext->DesiredAccess, DELETE)) {
+                PEPROCESS requestor = FltGetRequestorProcess(Data);
+                PCSTR requestorImage = (requestor != NULL)
+                    ? PsGetProcessImageFileName(requestor)
+                    : NULL;
+
+                if (XdowsBehaviorImageNameIsScriptHost(requestorImage)) {
+                    ransomBlock = XdowsRansomwareMonitorRecordSystemDelete(
+                        originatorPid, &name->Name);
+                }
+            }
         }
         if (!ransomBlock) {
             ransomBlock = XdowsRansomwareMonitorIsFlagged(originatorPid);

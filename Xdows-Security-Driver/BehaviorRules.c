@@ -419,6 +419,39 @@ XdowsBehaviorInspectCommandLine(
         return XdowsSecurityBehaviorSystemControlCommand;
     }
 
+    //
+    // Rule 10: EFI system partition mounting.
+    //   mountvol /S \\?\GLOBALROOT...   (or plain "mountvol /s")
+    // Mounting the ESP is the bootkit persistence step: the partition is
+    // hidden from Explorer and its contents survive OS reinstalls. There is
+    // effectively no consumer-grade legitimate reason to script it.
+    // Fail-CLOSED: matched as two independent substrings so any "mountvol"
+    // invocation carrying "/s" trips the rule.
+    //
+    if (XdowsBehaviorContainsW(cmd, cmdLen, L"mountvol") &&
+        XdowsBehaviorContainsW(cmd, cmdLen, L"/s")) {
+        return XdowsSecurityBehaviorEfiMount;
+    }
+
+    //
+    // Rule 11: Forced OOBE / provisioning reset.
+    //   sysprep /oobe /generalize
+    //   sysprep /generalize /oobe /shutdown ...
+    // Running sysprep wipes activation, provisioning packages, and local
+    // configuration on the next boot -- a destructive "soft factory reset"
+    // that attackers use to cover tracks or lock users out. Matched as
+    // "sysprep" plus one of the re-provision switches; a bare "sysprep"
+    // without switches does not trip the rule.
+    // Fail-CLOSED: the destructive switches are the attack, not incidental
+    // management tooling.
+    //
+    if (XdowsBehaviorContainsW(cmd, cmdLen, L"sysprep") &&
+        (XdowsBehaviorContainsW(cmd, cmdLen, L"/oobe") ||
+         XdowsBehaviorContainsW(cmd, cmdLen, L"/generalize") ||
+         XdowsBehaviorContainsW(cmd, cmdLen, L"/audit"))) {
+        return XdowsSecurityBehaviorOobeReset;
+    }
+
     return XdowsSecurityBehaviorNone;
 }
 
@@ -511,6 +544,37 @@ XdowsBehaviorTypeName(
     case XdowsSecurityBehaviorDestructiveDirectoryDelete: return L"DestructiveDirectoryDelete";
     case XdowsSecurityBehaviorOwnershipEscalation:  return L"OwnershipEscalation";
     case XdowsSecurityBehaviorSystemControlCommand: return L"SystemControlCommand";
+    case XdowsSecurityBehaviorEfiMount:            return L"EfiMount";
+    case XdowsSecurityBehaviorOobeReset:           return L"OobeReset";
+    case XdowsSecurityBehaviorSystemDirectoryRansomware: return L"SystemDirectoryRansomware";
     default:                             return L"None";
     }
+}
+
+//
+// TRUE if the EPROCESS 15-char image name is one of the Windows script
+// hosts used by the in-kernel system-directory ransomware monitor. Shares
+// the same membership list as the parent-chain rule so both detections
+// agree on what a script host is.
+//
+BOOLEAN
+XdowsBehaviorImageNameIsScriptHost(
+    _In_ PCSTR ImageName
+    )
+{
+    static const PCSTR scriptHosts[] = {
+        "cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe",
+        "cscript.exe", "mshta.exe", "rundll32.exe", "regsvr32.exe"
+    };
+    SIZE_T i;
+
+    if (ImageName == NULL) {
+        return FALSE;
+    }
+    for (i = 0; i < RTL_NUMBER_OF(scriptHosts); i++) {
+        if (XdowsBehaviorImageNameEquals(ImageName, scriptHosts[i])) {
+            return TRUE;
+        }
+    }
+    return FALSE;
 }

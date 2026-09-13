@@ -209,7 +209,28 @@ typedef enum _XDOWS_SECURITY_BEHAVIOR_TYPE {
     // System-state control commands: shutdown, net user. Legitimate admin
     // commands, but prime destructive post-exploitation primitives.
     //
-    XdowsSecurityBehaviorSystemControlCommand = 15
+    XdowsSecurityBehaviorSystemControlCommand = 15,
+    //
+    // mountvol with the /s switch: mounts the EFI system partition (optionally
+    // on a remote disk), which is the persistence surface for bootkits.
+    // Essentially never legitimate on an endpoint; fail-closed.
+    //
+    XdowsSecurityBehaviorEfiMount = 16,
+    //
+    // sysprep with /oobe and/or /generalize: re-provisions the machine and
+    // wipes activation, provisioning, and local configuration on next boot.
+    // Occasionally legitimate in IT deployment, but destructive enough that
+    // an explicit user decision is required; fail-closed.
+    //
+    XdowsSecurityBehaviorOobeReset = 17,
+    //
+    // A script host (cmd/powershell/wscript/mshta/...) mass-deleting files
+    // under the Windows directory. Detected by the in-kernel ransomware
+    // rate monitor (separate, stricter slot table); currently a pure kernel
+    // denial with no user-mode round trip. Reserved for a future event
+    // emission; user mode mirrors the value for protocol symmetry.
+    //
+    XdowsSecurityBehaviorSystemDirectoryRansomware = 18
 } XDOWS_SECURITY_BEHAVIOR_TYPE;
 
 typedef enum _XDOWS_SECURITY_DECISION_TYPE {

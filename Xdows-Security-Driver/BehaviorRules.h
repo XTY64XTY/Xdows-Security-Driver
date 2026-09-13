@@ -76,6 +76,18 @@ XdowsBehaviorInspectParentChain(
     );
 
 //
+// TRUE if the EPROCESS 15-char image name (PsGetProcessImageFileName, NOT
+// guaranteed null-terminated) belongs to a Windows script host
+// (cmd/powershell/pwsh/wscript/cscript/mshta/rundll32/regsvr32). Used by
+// the file minifilter to scope the system-directory ransomware monitor.
+// Comparison is bounded to 15 chars and case-insensitive.
+//
+BOOLEAN
+XdowsBehaviorImageNameIsScriptHost(
+    _In_ PCSTR ImageName
+    );
+
+//
 // Convert a behavior type to a human-readable wide string for logging.
 //
 PCWSTR

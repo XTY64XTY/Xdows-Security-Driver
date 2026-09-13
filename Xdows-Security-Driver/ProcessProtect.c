@@ -241,7 +241,10 @@ XdowsProcessApplyBehaviorPolicy(
     // commands (takeown, icacls, shutdown, net user, rd /s /q). When the
     // user-mode bridge is unavailable these must fail OPEN: blocking every
     // shutdown while the scanner is down would break the system. The
-    // parent-chain rule stays fail-CLOSED (confirmed exploit chain).
+    // parent-chain rule stays fail-CLOSED (confirmed exploit chain), and so
+    // do the EFI-mount and sysprep-reset rules (16/17): both are destructive
+    // persistence/reset primitives with essentially no recurring legitimate
+    // use, so an unavailable bridge must not silently release them.
     //
     failOpenOnInfrastructureFailure =
         behavior == XdowsSecurityBehaviorOwnershipEscalation ||

@@ -59,6 +59,46 @@ The memory-optimization block (same protocol version 9, additive only) adds:
   exe/dll/scr/com/pif/sys; script and document formats are covered at
   execution time by process-launch and command-line behavior rules.
 
+The protection-round block (same protocol version 9, additive only) adds:
+
+- Behavior types 16/17/18 (`EfiMount`, `OobeReset`,
+  `SystemDirectoryRansomware`). Types 16/17 are new command-line rules in the
+  kernel rule engine: `mountvol` + `/s` (EFI system partition mounting) and
+  `sysprep` + `/oobe`|`/generalize`|`/audit` (destructive re-provisioning
+  reset). Both are **fail-closed** on bridge/decision infrastructure failure
+  (destructive persistence/reset primitives, no recurring legitimate use on
+  consumer endpoints). Type 18 is reserved: system-directory ransomware is
+  currently enforced purely in-kernel (see below) and never reaches user mode.
+- System-binary masquerade interception (`FileProtect` `PreCreate`): a
+  write-open that creates or replaces a Windows system-binary name
+  (svchost.exe, rundll32.exe, regsvr32.exe, dllhost.exe, lsass.exe, csrss.exe,
+  smss.exe, winlogon.exe, wininit.exe, services.exe, spoolsv.exe, taskhostw.exe,
+  conhost.exe, dwm.exe, dllhst3g.exe) under `AppData`, `Downloads`, `Desktop`
+  (including OneDrive-redirected desktops), or `ProgramData` is denied
+  synchronously with `STATUS_ACCESS_DENIED`. Pure kernel denial: no event, no
+  user-mode round trip. CI-trusted processes and the registered client are
+  exempt.
+- System-directory ransomware dimension (`RansomwareMonitor`): destructive
+  opens (DELETE access) by script hosts (cmd/powershell/pwsh/wscript/cscript/
+  mshta/rundll32/regsvr32) under any `\Windows\` subtree are counted in a
+  separate slot table. Crossing `XDOWS_RANSOM_SYS_FILE_THRESHOLD` (50) opens
+  within `XDOWS_RANSOM_SYS_WINDOW_MS` (3000) flags the process, and further
+  opens are denied with `STATUS_VIRUS_INFECTED` exactly like the user-data
+  dimension. The CI-trust gate is deliberately NOT applied here: the
+  interpreter binary itself is always legitimately signed, so the
+  script-host identity is the discriminator. No user-data threshold changed:
+  `XDOWS_RANSOM_FILE_THRESHOLD` stays 10 document/media writes in 3000 ms;
+  the media extension class was widened (wav/flac/aac/m4a/m4v/wmv/mpg/mpeg/
+  3gp/flv/heic/webp) plus epub/vsd/one.
+- Registry protection round: registry gate honors the `KillActor` result-code
+  sentinel (`XDOWS_DECISION_RESULT_KILL_ACTOR`, mirrored by
+  `DriverProtocol.KillActorResultCode`) on confirmed Block verdicts for
+  critical persistence keys; the counter-kill shares the injection guard
+  rails (never the client, critical system processes, self-protected
+  processes, or PID <= 4). The rule-path budget stays
+  `XDOWS_SECURITY_MAX_REGISTRY_RULES = 32`; the app deploys 26 rules under
+  `Recommended`, so no protocol-breaking budget increase was required.
+
 The main app repository must mirror the new struct/IOCTL/flags in
 `DriverProtocol.cs` and `DriverBridgeClient.cs` to use the batch drain and
 async review; older app builds keep working unchanged because every addition
@@ -113,6 +153,13 @@ original operation; block or user-decision timeout denies it. If the bridge is
 unavailable before a hold starts, high-confidence command rules retain their
 kernel fail-closed behavior, policy bypass stays fail-open, and injection keeps
 its existing fail-open infrastructure policy.
+
+Behavior value 16 (`EfiMount`, `mountvol` + `/s`) and 17 (`OobeReset`,
+`sysprep` + `/oobe`|`/generalize`|`/audit`) are fail-closed command-line rules;
+values 13-15 (destructive directory delete, ownership escalation, system
+control) remain fail-open on infrastructure failure. Behavior value 18
+(`SystemDirectoryRansomware`) is currently kernel-internal: the ransomware
+rate monitor denies flagged script hosts without emitting an event.
 
 When the bridge or model fails before a threat is confirmed, user mode allows and logs the failure. When a threat is confirmed and the user refuses or times out, the decision is Block or Timeout.
 
