@@ -19,6 +19,7 @@ Environment:
 --*/
 
 #include "driver.h"
+#include "BehaviorRules.h"
 #include "codeintegrity.h"
 #include "registryprotect.h"
 #include "selfprotect.h"
@@ -44,6 +45,17 @@ NTSTATUS
 SeLocateProcessImageName(
     _In_ PEPROCESS Process,
     _Outptr_ PUNICODE_STRING* ImageFileName
+    );
+
+//
+// PsGetProcessImageFileName is declared in ntifs.h only; forward-declared
+// here. Exported by ntoskrnl.lib. Returns the cached 15-char EPROCESS image
+// name, which is not guaranteed to be null-terminated.
+//
+NTKERNELAPI
+PCHAR
+PsGetProcessImageFileName(
+    _In_ PEPROCESS Process
     );
 
 static
@@ -265,6 +277,21 @@ XdowsRegistryDecideMutation(
         PsGetCurrentProcess(),
         &sourceTrusted);
     if (signatureKnown && sourceTrusted) {
+        return STATUS_SUCCESS;
+    }
+
+    //
+    // Initiator exclusion list (capability 0x2000), REGISTRY scope. Matched
+    // with the acting image leaf name: the registry gate deliberately resolves
+    // no actor path on the hot path, so a path-suffix exclusion does not apply
+    // here. Registry rules already fail open when the decision infrastructure
+    // is unavailable, so an exclusion only removes consultation noise for
+    // known-heavy applications (games, installers, IMEs, build tools).
+    //
+    if (XdowsBehaviorIsInitiatorExcluded(
+            XDOWS_SECURITY_EXCLUSION_SCOPE_REGISTRY,
+            NULL,
+            PsGetProcessImageFileName(PsGetCurrentProcess()))) {
         return STATUS_SUCCESS;
     }
 

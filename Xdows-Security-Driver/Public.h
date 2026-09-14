@@ -31,6 +31,8 @@ Environment:
 #define XDOWS_SECURITY_CAP_R0_REGISTRY_PROTECTION 0x00000200u
 #define XDOWS_SECURITY_CAP_ASYNC_REVIEW 0x00000400u
 #define XDOWS_SECURITY_CAP_EVENT_BATCH 0x00000800u
+#define XDOWS_SECURITY_CAP_RULE_INTERPRETER 0x00001000u
+#define XDOWS_SECURITY_CAP_INITIATOR_EXCLUSION 0x00002000u
 #define XDOWS_SECURITY_CAPABILITIES ( \
     XDOWS_SECURITY_CAP_PRIORITY_QUEUE | \
     XDOWS_SECURITY_CAP_DIRTY_WRITE_COALESCING | \
@@ -43,7 +45,9 @@ Environment:
     XDOWS_SECURITY_CAP_R0_BOOT_PROTECTION | \
     XDOWS_SECURITY_CAP_R0_REGISTRY_PROTECTION | \
     XDOWS_SECURITY_CAP_ASYNC_REVIEW | \
-    XDOWS_SECURITY_CAP_EVENT_BATCH)
+    XDOWS_SECURITY_CAP_EVENT_BATCH | \
+    XDOWS_SECURITY_CAP_RULE_INTERPRETER | \
+    XDOWS_SECURITY_CAP_INITIATOR_EXCLUSION)
 
 //
 // Client registration flags. The driver ignores unknown bits for forward
@@ -79,6 +83,132 @@ Environment:
 #define XDOWS_SECURITY_MAX_REGISTRY_RULES 32u
 #define XDOWS_SECURITY_MAX_REGISTRY_PATH_CHARS 260u
 #define XDOWS_SECURITY_MAX_REGISTRY_VALUE_CHARS 260u
+
+//
+// Declarative behavior-rule interpreter (capability 0x1000). User mode sends
+// a whole rule set through IOCTL_XDOWS_SECURITY_SET_BEHAVIOR_RULES; the
+// kernel stores a validated copy and evaluates it in addition to the fixed
+// in-kernel command-line rules. Purely additive: no existing rule, struct,
+// enum, or IOCTL changes meaning.
+//
+#define XDOWS_SECURITY_MAX_BEHAVIOR_RULES 32u
+#define XDOWS_SECURITY_MAX_RULE_TERMS 3u
+#define XDOWS_SECURITY_MAX_RULE_TERM_CHARS 96u
+
+//
+// Rule flags.
+//
+// KILL_ACTOR: a user-confirmed Block for this rule additionally requests the
+// counter-termination of the acting process (decision ResultCode sentinel,
+// same guard rails as the injection gate).
+// FAIL_CLOSED: when the bridge cannot deliver the event or the decision times
+// out, deny the operation. Without it the rule is fail-open on infrastructure
+// failure and only denies on an explicit Block verdict.
+//
+#define XDOWS_SECURITY_RULE_FLAG_KILL_ACTOR 0x00000001u
+#define XDOWS_SECURITY_RULE_FLAG_FAIL_CLOSED 0x00000002u
+
+//
+// Operations a rule applies to. A rule whose Operations mask does not cover
+// the operation being evaluated never matches.
+//
+#define XDOWS_SECURITY_RULE_OPERATION_PROCESS_CREATE 0x00000001u
+#define XDOWS_SECURITY_RULE_OPERATION_FILE_CREATE 0x00000002u
+#define XDOWS_SECURITY_RULE_OPERATION_FILE_WRITE 0x00000004u
+#define XDOWS_SECURITY_RULE_OPERATION_FILE_DELETE 0x00000008u
+#define XDOWS_SECURITY_RULE_OPERATION_FILE_RENAME 0x00000010u
+#define XDOWS_SECURITY_RULE_OPERATION_ALL 0x0000001Fu
+
+typedef enum _XDOWS_SECURITY_RULE_MATCH_KIND {
+    //
+    // The whole axis is unconstrained (no terms required).
+    //
+    XdowsSecurityRuleMatchAny = 0,
+    //
+    // Target term matches the path tail (extension-style, e.g. ".locked").
+    //
+    XdowsSecurityRuleMatchSuffix = 1,
+    //
+    // Target term matches a backslash-bounded path segment (e.g. "Startup").
+    //
+    XdowsSecurityRuleMatchSegment = 2,
+    //
+    // Target term matches the path start.
+    //
+    XdowsSecurityRuleMatchPrefix = 3,
+    //
+    // Target term matches anywhere in the path.
+    //
+    XdowsSecurityRuleMatchContains = 4
+} XDOWS_SECURITY_RULE_MATCH_KIND;
+
+//
+// One matching axis of a rule. TermCount == 0 leaves the axis unconstrained.
+// On the Initiator axis a term equals an image leaf name (e.g. "cmd.exe") or,
+// when it contains a backslash, matches as a case-insensitive actor-path
+// suffix. On the CommandLine axis every term must appear as a substring.
+// On the Target axis the terms are interpreted with the rule's
+// TargetMatchKind; a rule matches when ANY target term matches.
+//
+typedef struct _XDOWS_SECURITY_RULE_TERM_AXIS {
+    ULONG TermCount;
+    ULONG Reserved;
+    WCHAR Terms[XDOWS_SECURITY_MAX_RULE_TERMS][XDOWS_SECURITY_MAX_RULE_TERM_CHARS];
+} XDOWS_SECURITY_RULE_TERM_AXIS, *PXDOWS_SECURITY_RULE_TERM_AXIS;
+
+//
+// Declarative rule: Initiator x CommandLine x Target, scoped by Operations,
+// optionally rate-limited by Threshold/WindowMs and escalated by Flags.
+//
+typedef struct _XDOWS_SECURITY_BEHAVIOR_RULE {
+    ULONG RuleId;
+    //
+    // Behavior type reported to user mode when the rule fires. Use a
+    // XDOWS_SECURITY_BEHAVIOR_TYPE value; types 16+ are the extensible range.
+    //
+    ULONG BehaviorType;
+    ULONG Flags;
+    ULONG Operations;
+    //
+    // 0 = fire on every match. > 0 = fire only after Threshold matches by the
+    // same process inside WindowMs (sliding window, like the ransomware
+    // monitor). WindowMs is clamped to 60000.
+    //
+    ULONG Threshold;
+    ULONG WindowMs;
+    ULONG TargetMatchKind;
+    ULONG Reserved;
+    XDOWS_SECURITY_RULE_TERM_AXIS Initiator;
+    XDOWS_SECURITY_RULE_TERM_AXIS Target;
+    XDOWS_SECURITY_RULE_TERM_AXIS CommandLine;
+} XDOWS_SECURITY_BEHAVIOR_RULE, *PXDOWS_SECURITY_BEHAVIOR_RULE;
+
+//
+// Initiator exclusion list (capability 0x2000). Terminates the user-mode
+// consultation for the configured scopes when the acting process matches, so
+// known-heavy applications (games, downloaders, IMEs, build tools) stop
+// reaching the decision window. Exclusions never disable the critical
+// command-line threat rules or the kernel-side denials.
+//
+#define XDOWS_SECURITY_MAX_INITIATOR_EXCLUSIONS 32u
+#define XDOWS_SECURITY_MAX_EXCLUSION_CHARS 160u
+
+#define XDOWS_SECURITY_EXCLUSION_SCOPE_PROCESS 0x00000001u
+#define XDOWS_SECURITY_EXCLUSION_SCOPE_FILE 0x00000002u
+#define XDOWS_SECURITY_EXCLUSION_SCOPE_HANDLE 0x00000004u
+#define XDOWS_SECURITY_EXCLUSION_SCOPE_REGISTRY 0x00000008u
+#define XDOWS_SECURITY_EXCLUSION_SCOPE_ALL 0x0000000Fu
+
+typedef struct _XDOWS_SECURITY_INITIATOR_EXCLUSION {
+    ULONG ScopeMask;
+    ULONG Reserved;
+    //
+    // Image leaf name (e.g. "steam.exe") or, when the pattern contains a
+    // backslash, a case-insensitive actor-path suffix (e.g.
+    // "\Steam\steamapps\common\").
+    //
+    WCHAR Pattern[XDOWS_SECURITY_MAX_EXCLUSION_CHARS];
+} XDOWS_SECURITY_INITIATOR_EXCLUSION, *PXDOWS_SECURITY_INITIATOR_EXCLUSION;
 
 //
 // ResultCode sentinel set by user mode on a Block verdict to additionally
@@ -130,6 +260,10 @@ Environment:
     CTL_CODE(FILE_DEVICE_XDOWS_SECURITY, 0x80F, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_XDOWS_SECURITY_GET_NEXT_EVENTS \
     CTL_CODE(FILE_DEVICE_XDOWS_SECURITY, 0x810, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_XDOWS_SECURITY_SET_BEHAVIOR_RULES \
+    CTL_CODE(FILE_DEVICE_XDOWS_SECURITY, 0x811, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_XDOWS_SECURITY_SET_INITIATOR_EXCLUSIONS \
+    CTL_CODE(FILE_DEVICE_XDOWS_SECURITY, 0x812, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 DEFINE_GUID(GUID_DEVINTERFACE_XdowsSecurityDriver,
     0xec5db072, 0x8119, 0x4d65, 0xa7, 0xae, 0x67, 0xd7, 0xf3, 0x10, 0x05, 0xe1);
@@ -275,6 +409,26 @@ typedef struct _XDOWS_SECURITY_PROTOCOL_HEADER {
     ULONG Size;
     ULONG Version;
 } XDOWS_SECURITY_PROTOCOL_HEADER, *PXDOWS_SECURITY_PROTOCOL_HEADER;
+
+//
+// Declarative rule set downcall (capability 0x1000). Declared here rather
+// than next to XDOWS_SECURITY_BEHAVIOR_RULE because the protocol header
+// typedef must be visible first.
+//
+typedef struct _XDOWS_SECURITY_BEHAVIOR_RULE_REQUEST {
+    XDOWS_SECURITY_PROTOCOL_HEADER Header;
+    ULONG Enabled;
+    ULONG RuleCount;
+    ULONG Reserved;
+    XDOWS_SECURITY_BEHAVIOR_RULE Rules[XDOWS_SECURITY_MAX_BEHAVIOR_RULES];
+} XDOWS_SECURITY_BEHAVIOR_RULE_REQUEST, *PXDOWS_SECURITY_BEHAVIOR_RULE_REQUEST;
+
+typedef struct _XDOWS_SECURITY_INITIATOR_EXCLUSION_REQUEST {
+    XDOWS_SECURITY_PROTOCOL_HEADER Header;
+    ULONG Count;
+    ULONG Reserved;
+    XDOWS_SECURITY_INITIATOR_EXCLUSION Entries[XDOWS_SECURITY_MAX_INITIATOR_EXCLUSIONS];
+} XDOWS_SECURITY_INITIATOR_EXCLUSION_REQUEST, *PXDOWS_SECURITY_INITIATOR_EXCLUSION_REQUEST;
 
 typedef struct _XDOWS_SECURITY_REGISTER_REQUEST {
     XDOWS_SECURITY_PROTOCOL_HEADER Header;

@@ -46,6 +46,23 @@ Environment:
 #endif
 
 //
+// PsGetProcessImageFileName and PsLookupProcessByProcessId are declared in
+// ntifs.h only; forward-declared here. Both are exported by ntoskrnl.lib.
+//
+NTKERNELAPI
+PCHAR
+PsGetProcessImageFileName(
+    _In_ PEPROCESS Process
+    );
+
+NTKERNELAPI
+NTSTATUS
+PsLookupProcessByProcessId(
+    _In_ HANDLE ProcessId,
+    _Outptr_ PEPROCESS* Process
+    );
+
+//
 // Synchronous user-mode verdict timeout for process-launch decisions.
 // See module header for the rationale behind the shorter-than-default value.
 //
@@ -204,6 +221,10 @@ XdowsProcessApplyBehaviorPolicy(
     NTSTATUS status;
     BOOLEAN infrastructureFailure;
     BOOLEAN failOpenOnInfrastructureFailure;
+    BOOLEAN customRuleMatched = FALSE;
+    ULONG matchedRuleId = 0;
+    ULONG matchedRuleFlags = 0;
+    ULONG matchedBehaviorType = 0;
 
     if (!XdowsBehaviorProtectIsEnabled()) {
         return FALSE;
@@ -231,9 +252,65 @@ XdowsProcessApplyBehaviorPolicy(
         behavior = XdowsBehaviorInspectParentChain(
             Event->ParentProcessId,
             &childImage);
-        if (behavior == XdowsSecurityBehaviorNone) {
-            return FALSE;
+    }
+
+    //
+    // Declarative rule set (capability 0x1000). Evaluated only when no fixed
+    // rule matched, so the fixed high-confidence rules keep their established
+    // fail-open/fail-closed classification.
+    //
+    // On a launch event the acting process is the image being created, so the
+    // Initiator axis is matched against the launched image: its EPROCESS leaf
+    // name and, for path-suffix patterns, its full path. The Target axis does
+    // not apply to a launch (no path is being operated on yet).
+    //
+    if (behavior == XdowsSecurityBehaviorNone) {
+        UNICODE_STRING actorPath;
+        PEPROCESS actorProcess = NULL;
+        PCSTR actorImageName = NULL;
+        BOOLEAN actorExcluded;
+
+        RtlInitEmptyUnicodeString(
+            &actorPath,
+            Event->ImagePath,
+            XDOWS_SECURITY_MAX_PATH_CHARS * sizeof(WCHAR));
+        actorPath.Length = (USHORT)(wcslen(Event->ImagePath) * sizeof(WCHAR));
+
+        if (Event->ProcessId != 0 &&
+            NT_SUCCESS(PsLookupProcessByProcessId(
+                ULongToHandle(Event->ProcessId),
+                &actorProcess)) &&
+            actorProcess != NULL) {
+            actorImageName = PsGetProcessImageFileName(actorProcess);
         }
+
+        actorExcluded = XdowsBehaviorIsInitiatorExcluded(
+            XDOWS_SECURITY_EXCLUSION_SCOPE_PROCESS,
+            &actorPath,
+            actorImageName);
+
+        if (!actorExcluded &&
+            XdowsBehaviorEvaluateCustomRules(
+                &actorPath,
+                actorImageName,
+                &commandLine,
+                NULL,
+                XDOWS_SECURITY_RULE_OPERATION_PROCESS_CREATE,
+                Event->ProcessId,
+                &matchedRuleId,
+                &matchedRuleFlags,
+                &matchedBehaviorType)) {
+            behavior = (XDOWS_SECURITY_BEHAVIOR_TYPE)matchedBehaviorType;
+            customRuleMatched = TRUE;
+        }
+
+        if (actorProcess != NULL) {
+            ObDereferenceObject(actorProcess);
+        }
+    }
+
+    if (behavior == XdowsSecurityBehaviorNone) {
+        return FALSE;
     }
 
     //
@@ -246,21 +323,43 @@ XdowsProcessApplyBehaviorPolicy(
     // persistence/reset primitives with essentially no recurring legitimate
     // use, so an unavailable bridge must not silently release them.
     //
-    failOpenOnInfrastructureFailure =
-        behavior == XdowsSecurityBehaviorOwnershipEscalation ||
-        behavior == XdowsSecurityBehaviorSystemControlCommand ||
-        behavior == XdowsSecurityBehaviorDestructiveDirectoryDelete;
+    // A declarative rule carries its own classification: it fails open on
+    // infrastructure failure unless it was configured with FAIL_CLOSED.
+    //
+    failOpenOnInfrastructureFailure = customRuleMatched
+        ? ((matchedRuleFlags & XDOWS_SECURITY_RULE_FLAG_FAIL_CLOSED) == 0)
+        : (behavior == XdowsSecurityBehaviorOwnershipEscalation ||
+           behavior == XdowsSecurityBehaviorSystemControlCommand ||
+           behavior == XdowsSecurityBehaviorDestructiveDirectoryDelete);
 
     Event->EventType = XdowsSecurityEventBehavior;
     Event->BehaviorType = (ULONG)behavior;
     Event->Flags |= XdowsSecurityEventFlagThreatConfirmed;
 
-    XdowsLogWrite(
-        XdowsSecurityLogWarning,
-        Event->EventId,
-        Event->CorrelationId,
-        L"Behavior",
-        XdowsBehaviorTypeName(behavior));
+    if (customRuleMatched) {
+        WCHAR ruleMessage[128];
+
+        if (NT_SUCCESS(RtlStringCchPrintfW(
+                ruleMessage,
+                RTL_NUMBER_OF(ruleMessage),
+                L"Declarative rule %lu matched at launch: %s",
+                matchedRuleId,
+                XdowsBehaviorTypeName(behavior)))) {
+            XdowsLogWrite(
+                XdowsSecurityLogWarning,
+                Event->EventId,
+                Event->CorrelationId,
+                L"Behavior",
+                ruleMessage);
+        }
+    } else {
+        XdowsLogWrite(
+            XdowsSecurityLogWarning,
+            Event->EventId,
+            Event->CorrelationId,
+            L"Behavior",
+            XdowsBehaviorTypeName(behavior));
+    }
 
     status = XdowsQueueEventAndWait(Event, &decision);
     infrastructureFailure = !NT_SUCCESS(status) ||

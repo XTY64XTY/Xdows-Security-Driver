@@ -54,6 +54,37 @@ Environment:
 static volatile LONG g_BehaviorProtectionEnabled;
 
 //
+// Declarative rule interpreter state (capability 0x1000) and initiator
+// exclusion list (capability 0x2000). Both are replaced as a whole by the
+// registered client and read on the hot paths, so a push lock guards the
+// swap: the evaluator takes it shared, configuration takes it exclusive.
+//
+static XDOWS_SECURITY_BEHAVIOR_RULE g_BehaviorRules[XDOWS_SECURITY_MAX_BEHAVIOR_RULES];
+static ULONG g_BehaviorRuleCount;
+static XDOWS_SECURITY_INITIATOR_EXCLUSION g_InitiatorExclusions[XDOWS_SECURITY_MAX_INITIATOR_EXCLUSIONS];
+static ULONG g_InitiatorExclusionCount;
+static EX_PUSH_LOCK g_RuleSetLock;
+static BOOLEAN g_RuleSetLockInitialized;
+
+//
+// Sliding-window counters for rules that declare a Threshold. Keyed by
+// (RuleId, ProcessId); a small fixed table keeps the hot path allocation
+// free, matching the ransomware monitor's design.
+//
+#define XDOWS_BEHAVIOR_RATE_SLOTS 32u
+
+typedef struct _XDOWS_BEHAVIOR_RATE_SLOT {
+    ULONG         RuleId;
+    ULONG         ProcessId;
+    ULONG         Count;
+    LARGE_INTEGER WindowStart;
+    BOOLEAN       Flagged;
+} XDOWS_BEHAVIOR_RATE_SLOT, *PXDOWS_BEHAVIOR_RATE_SLOT;
+
+static XDOWS_BEHAVIOR_RATE_SLOT g_BehaviorRateSlots[XDOWS_BEHAVIOR_RATE_SLOTS];
+static KSPIN_LOCK g_BehaviorRateLock;
+
+//
 // PsGetProcessImageFileName is declared in ntifs.h only. Returns the cached
 // image name (truncated to 15 chars) of a process.
 //
@@ -166,6 +197,16 @@ XdowsBehaviorProtectInitialize(
     VOID
     )
 {
+    if (!g_RuleSetLockInitialized) {
+        ExInitializePushLock(&g_RuleSetLock);
+        KeInitializeSpinLock(&g_BehaviorRateLock);
+        g_BehaviorRuleCount = 0;
+        g_InitiatorExclusionCount = 0;
+        RtlZeroMemory(g_BehaviorRules, sizeof(g_BehaviorRules));
+        RtlZeroMemory(g_InitiatorExclusions, sizeof(g_InitiatorExclusions));
+        RtlZeroMemory(g_BehaviorRateSlots, sizeof(g_BehaviorRateSlots));
+        g_RuleSetLockInitialized = TRUE;
+    }
     (VOID)InterlockedExchange(&g_BehaviorProtectionEnabled, 1);
     XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
         L"R0 behavior protection active.");
@@ -521,6 +562,654 @@ XdowsBehaviorInspectParentChain(
 
     ObDereferenceObject(parent);
     return XdowsSecurityBehaviorNone;
+}
+
+//
+// ---------------------------------------------------------------------------
+// Declarative rule interpreter and initiator exclusion list.
+// ---------------------------------------------------------------------------
+//
+
+//
+// Bounded, case-insensitive substring test against a raw wide buffer. The
+// buffer is not assumed to be null-terminated; Needle must be.
+//
+static
+BOOLEAN
+XdowsBehaviorBufferContains(
+    _In_reads_(HaystackLen) PCWSTR Haystack,
+    _In_ SIZE_T HaystackLen,
+    _In_ PCWSTR Needle
+    )
+{
+    SIZE_T needleLen = wcslen(Needle);
+    SIZE_T i;
+
+    if (needleLen == 0 || HaystackLen < needleLen) {
+        return FALSE;
+    }
+    for (i = 0; i + needleLen <= HaystackLen; i++) {
+        if (_wcsnicmp(Haystack + i, Needle, needleLen) == 0) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+//
+// Bounded, case-insensitive substring test between two counted wide strings.
+//
+static
+BOOLEAN
+XdowsBehaviorStringContains(
+    _In_ PCUNICODE_STRING Haystack,
+    _In_ PCUNICODE_STRING Needle
+    )
+{
+    SIZE_T haystackLen = Haystack->Length / sizeof(WCHAR);
+    SIZE_T needleLen = Needle->Length / sizeof(WCHAR);
+    SIZE_T i;
+
+    if (needleLen == 0 || haystackLen < needleLen) {
+        return FALSE;
+    }
+    for (i = 0; i + needleLen <= haystackLen; i++) {
+        if (_wcsnicmp(Haystack->Buffer + i, Needle->Buffer, needleLen) == 0) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+//
+// Bounded backslash-segment test (so "\Windows\" matches but "\WindowsOld\"
+// does not). Both inputs are counted, not null-terminated.
+//
+static
+BOOLEAN
+XdowsBehaviorPathContainsSegment(
+    _In_ PCUNICODE_STRING Path,
+    _In_ PCUNICODE_STRING Segment
+    )
+{
+    SIZE_T pathLen = Path->Length / sizeof(WCHAR);
+    SIZE_T segmentLen = Segment->Length / sizeof(WCHAR);
+    SIZE_T i;
+
+    if (segmentLen == 0 || pathLen < segmentLen + 2) {
+        return FALSE;
+    }
+    for (i = 0; i + segmentLen + 1 < pathLen; i++) {
+        if (Path->Buffer[i] != L'\\') {
+            continue;
+        }
+        if (_wcsnicmp(Path->Buffer + i + 1, Segment->Buffer, segmentLen) == 0 &&
+            Path->Buffer[i + 1 + segmentLen] == L'\\') {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static
+BOOLEAN
+XdowsBehaviorTermIsEmpty(
+    _In_ PCWSTR Term
+    )
+{
+    return Term[0] == UNICODE_NULL;
+}
+
+//
+// TRUE when one pattern (image leaf name, or actor-path suffix when it
+// contains a backslash) selects the acting process.
+//
+static
+BOOLEAN
+XdowsBehaviorPatternMatchesActor(
+    _In_ PCWSTR Pattern,
+    _In_opt_ PCUNICODE_STRING ActorPath,
+    _In_opt_ PCSTR ActorImageName
+    )
+{
+    SIZE_T i;
+    UNICODE_STRING patternView;
+    UNICODE_STRING pathView;
+    CHAR leaf[XDOWS_BEHAVIOR_IMAGE_NAME_MAX_CHARS + 1];
+
+    if (XdowsBehaviorTermIsEmpty(Pattern)) {
+        return FALSE;
+    }
+
+    for (i = 0; Pattern[i] != UNICODE_NULL; i++) {
+        if (Pattern[i] == L'\\') {
+            //
+            // Path-suffix pattern: requires the full actor image path.
+            //
+            if (ActorPath == NULL || ActorPath->Buffer == NULL ||
+                ActorPath->Length == 0) {
+                return FALSE;
+            }
+            RtlInitUnicodeString(&patternView, Pattern);
+            pathView.Buffer = ActorPath->Buffer;
+            pathView.Length = ActorPath->Length;
+            pathView.MaximumLength = ActorPath->Length;
+            return ActorPath->Length >= patternView.Length &&
+                RtlSuffixUnicodeString(&patternView, &pathView, TRUE);
+        }
+    }
+
+    //
+    // Leaf-name pattern: bounded to the EPROCESS 15-char truncation so the
+    // comparison never reads past the cached image name.
+    //
+    if (ActorImageName == NULL) {
+        return FALSE;
+    }
+    for (i = 0; i < XDOWS_BEHAVIOR_IMAGE_NAME_MAX_CHARS; i++) {
+        if (Pattern[i] == UNICODE_NULL) {
+            break;
+        }
+        if (Pattern[i] > 0x7F) {
+            return FALSE;
+        }
+        leaf[i] = (CHAR)Pattern[i];
+    }
+    if (Pattern[i] != UNICODE_NULL) {
+        return FALSE;
+    }
+    leaf[i] = '\0';
+    return XdowsBehaviorImageNameEquals(ActorImageName, leaf);
+}
+
+static
+BOOLEAN
+XdowsBehaviorRuleInitiatorMatches(
+    _In_ PXDOWS_SECURITY_BEHAVIOR_RULE Rule,
+    _In_opt_ PCUNICODE_STRING ActorPath,
+    _In_opt_ PCSTR ActorImageName
+    )
+{
+    ULONG i;
+
+    if (Rule->Initiator.TermCount == 0) {
+        return TRUE;
+    }
+    for (i = 0; i < Rule->Initiator.TermCount; i++) {
+        if (XdowsBehaviorPatternMatchesActor(
+                Rule->Initiator.Terms[i],
+                ActorPath,
+                ActorImageName)) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+//
+// Every command-line term must appear in the (lowercased) command line.
+// An unconstrained axis, or an axis whose terms are all empty, matches.
+//
+static
+BOOLEAN
+XdowsBehaviorRuleCommandLineMatches(
+    _In_ PXDOWS_SECURITY_BEHAVIOR_RULE Rule,
+    _In_reads_(CommandLength) PCWSTR CommandLineLower,
+    _In_ SIZE_T CommandLength
+    )
+{
+    ULONG i;
+
+    if (Rule->CommandLine.TermCount == 0) {
+        return TRUE;
+    }
+    for (i = 0; i < Rule->CommandLine.TermCount; i++) {
+        PCWSTR term = Rule->CommandLine.Terms[i];
+        if (XdowsBehaviorTermIsEmpty(term)) {
+            continue;
+        }
+        if (!XdowsBehaviorBufferContains(CommandLineLower, CommandLength, term)) {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static
+BOOLEAN
+XdowsBehaviorRuleTargetMatches(
+    _In_ PXDOWS_SECURITY_BEHAVIOR_RULE Rule,
+    _In_opt_ PCUNICODE_STRING TargetPath
+    )
+{
+    ULONG i;
+    UNICODE_STRING pathView;
+    UNICODE_STRING termView;
+
+    if (Rule->Target.TermCount == 0) {
+        return TRUE;
+    }
+    if (TargetPath == NULL || TargetPath->Buffer == NULL ||
+        TargetPath->Length == 0) {
+        return FALSE;
+    }
+
+    pathView.Buffer = TargetPath->Buffer;
+    pathView.Length = TargetPath->Length;
+    pathView.MaximumLength = TargetPath->Length;
+
+    for (i = 0; i < Rule->Target.TermCount; i++) {
+        PCWSTR term = Rule->Target.Terms[i];
+
+        if (XdowsBehaviorTermIsEmpty(term)) {
+            continue;
+        }
+        RtlInitUnicodeString(&termView, term);
+
+        switch (Rule->TargetMatchKind) {
+        case XdowsSecurityRuleMatchSuffix:
+            if (TargetPath->Length >= termView.Length &&
+                RtlSuffixUnicodeString(&termView, &pathView, TRUE)) {
+                return TRUE;
+            }
+            break;
+        case XdowsSecurityRuleMatchSegment:
+            if (XdowsBehaviorPathContainsSegment(&pathView, &termView)) {
+                return TRUE;
+            }
+            break;
+        case XdowsSecurityRuleMatchPrefix:
+            if (TargetPath->Length >= termView.Length &&
+                RtlPrefixUnicodeString(&termView, &pathView, TRUE)) {
+                return TRUE;
+            }
+            break;
+        case XdowsSecurityRuleMatchContains:
+            if (XdowsBehaviorStringContains(&pathView, &termView)) {
+                return TRUE;
+            }
+            break;
+        default:
+            return FALSE;
+        }
+    }
+    return FALSE;
+}
+
+//
+// Sliding-window gate for rules that declare a Threshold. Returns TRUE when
+// the rule has reached its threshold inside the window (and keeps returning
+// TRUE for the rest of the window, so an ongoing burst stays blocked).
+//
+static
+BOOLEAN
+XdowsBehaviorRuleRateAllows(
+    _In_ ULONG RuleId,
+    _In_ ULONG ProcessId,
+    _In_ ULONG Threshold,
+    _In_ ULONG WindowMs
+    )
+{
+    KIRQL oldIrql;
+    ULONG slot;
+    ULONG window;
+    BOOLEAN allowed = FALSE;
+    LARGE_INTEGER now;
+    ULONGLONG nowMs;
+    ULONGLONG startMs;
+    ULONGLONG elapsedMs;
+
+    if (Threshold <= 1) {
+        return TRUE;
+    }
+    window = WindowMs;
+    if (window == 0) {
+        window = 1000u;
+    } else if (window > 60000u) {
+        window = 60000u;
+    }
+
+    KeQuerySystemTime(&now);
+    nowMs = (ULONGLONG)(now.QuadPart / 10000);
+
+    KeAcquireSpinLock(&g_BehaviorRateLock, &oldIrql);
+
+    for (slot = 0; slot < XDOWS_BEHAVIOR_RATE_SLOTS; slot++) {
+        if (g_BehaviorRateSlots[slot].RuleId == RuleId &&
+            g_BehaviorRateSlots[slot].ProcessId == ProcessId) {
+            break;
+        }
+    }
+    if (slot == XDOWS_BEHAVIOR_RATE_SLOTS) {
+        for (slot = 0; slot < XDOWS_BEHAVIOR_RATE_SLOTS; slot++) {
+            if (g_BehaviorRateSlots[slot].RuleId == 0) {
+                g_BehaviorRateSlots[slot].RuleId = RuleId;
+                g_BehaviorRateSlots[slot].ProcessId = ProcessId;
+                g_BehaviorRateSlots[slot].Count = 0;
+                g_BehaviorRateSlots[slot].WindowStart = now;
+                g_BehaviorRateSlots[slot].Flagged = FALSE;
+                break;
+            }
+        }
+    }
+
+    if (slot < XDOWS_BEHAVIOR_RATE_SLOTS) {
+        PXDOWS_BEHAVIOR_RATE_SLOT entry = &g_BehaviorRateSlots[slot];
+
+        startMs = (ULONGLONG)(entry->WindowStart.QuadPart / 10000);
+        elapsedMs = (nowMs >= startMs) ? (nowMs - startMs) : 0;
+
+        if (elapsedMs >= window) {
+            entry->Count = 1;
+            entry->WindowStart = now;
+            entry->Flagged = FALSE;
+        } else if (entry->Flagged) {
+            allowed = TRUE;
+        } else {
+            entry->Count++;
+            if (entry->Count >= Threshold) {
+                entry->Flagged = TRUE;
+                allowed = TRUE;
+            }
+        }
+    }
+
+    KeReleaseSpinLock(&g_BehaviorRateLock, oldIrql);
+    return allowed;
+}
+
+//
+// Validate one axis: bounded term count and a null-terminated, non-empty
+// string inside the fixed term buffer for every active term.
+//
+static
+NTSTATUS
+XdowsBehaviorValidateAxis(
+    _In_ PXDOWS_SECURITY_RULE_TERM_AXIS Axis
+    )
+{
+    ULONG i;
+
+    if (Axis->TermCount > XDOWS_SECURITY_MAX_RULE_TERMS) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    for (i = 0; i < Axis->TermCount; i++) {
+        size_t length = 0;
+        SIZE_T c;
+
+        if (!NT_SUCCESS(RtlStringCchLengthW(
+                Axis->Terms[i],
+                XDOWS_SECURITY_MAX_RULE_TERM_CHARS,
+                &length))) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (length == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        //
+        // A term must be countable and must not contain a literal wildcard;
+        // the interpreter only supports literal matching, so accepting "*.exe"
+        // would silently never match and hide a configuration mistake.
+        //
+        for (c = 0; c < length; c++) {
+            if (Axis->Terms[i][c] == L'*' || Axis->Terms[i][c] == L'?') {
+                return STATUS_INVALID_PARAMETER;
+            }
+        }
+    }
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+XdowsBehaviorConfigureRules(
+    _In_ PXDOWS_SECURITY_BEHAVIOR_RULE_REQUEST Request
+    )
+{
+    ULONG i;
+
+    if (Request == NULL || Request->Enabled > 1 ||
+        Request->RuleCount > XDOWS_SECURITY_MAX_BEHAVIOR_RULES) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (!g_RuleSetLockInitialized) {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    for (i = 0; i < Request->RuleCount; i++) {
+        PXDOWS_SECURITY_BEHAVIOR_RULE rule = &Request->Rules[i];
+
+        if (rule->RuleId == 0 || rule->BehaviorType == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (rule->TargetMatchKind > XdowsSecurityRuleMatchContains) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if ((rule->Operations & ~XDOWS_SECURITY_RULE_OPERATION_ALL) != 0 ||
+            rule->Operations == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if ((rule->Flags & ~(XDOWS_SECURITY_RULE_FLAG_KILL_ACTOR |
+                             XDOWS_SECURITY_RULE_FLAG_FAIL_CLOSED)) != 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (rule->Threshold != 0 && rule->Threshold > 10000u) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (!NT_SUCCESS(XdowsBehaviorValidateAxis(&rule->Initiator)) ||
+            !NT_SUCCESS(XdowsBehaviorValidateAxis(&rule->Target)) ||
+            !NT_SUCCESS(XdowsBehaviorValidateAxis(&rule->CommandLine))) {
+            return STATUS_INVALID_PARAMETER;
+        }
+    }
+
+    KeEnterCriticalRegion();
+    ExAcquirePushLockExclusive(&g_RuleSetLock);
+    RtlZeroMemory(g_BehaviorRules, sizeof(g_BehaviorRules));
+    if (Request->Enabled != 0 && Request->RuleCount != 0) {
+        RtlCopyMemory(
+            g_BehaviorRules,
+            Request->Rules,
+            sizeof(XDOWS_SECURITY_BEHAVIOR_RULE) * Request->RuleCount);
+        g_BehaviorRuleCount = Request->RuleCount;
+    } else {
+        g_BehaviorRuleCount = 0;
+    }
+    ExReleasePushLockExclusive(&g_RuleSetLock);
+    KeLeaveCriticalRegion();
+
+    RtlZeroMemory(g_BehaviorRateSlots, sizeof(g_BehaviorRateSlots));
+
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
+        L"Declarative behavior rule set applied.");
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+XdowsBehaviorConfigureInitiatorExclusions(
+    _In_ PXDOWS_SECURITY_INITIATOR_EXCLUSION_REQUEST Request
+    )
+{
+    ULONG i;
+
+    if (Request == NULL ||
+        Request->Count > XDOWS_SECURITY_MAX_INITIATOR_EXCLUSIONS) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (!g_RuleSetLockInitialized) {
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    for (i = 0; i < Request->Count; i++) {
+        PXDOWS_SECURITY_INITIATOR_EXCLUSION entry = &Request->Entries[i];
+        size_t length = 0;
+
+        if ((entry->ScopeMask & ~XDOWS_SECURITY_EXCLUSION_SCOPE_ALL) != 0 ||
+            entry->ScopeMask == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (!NT_SUCCESS(RtlStringCchLengthW(
+                entry->Pattern,
+                XDOWS_SECURITY_MAX_EXCLUSION_CHARS,
+                &length)) ||
+            length == 0) {
+            return STATUS_INVALID_PARAMETER;
+        }
+    }
+
+    KeEnterCriticalRegion();
+    ExAcquirePushLockExclusive(&g_RuleSetLock);
+    RtlZeroMemory(g_InitiatorExclusions, sizeof(g_InitiatorExclusions));
+    if (Request->Count != 0) {
+        RtlCopyMemory(
+            g_InitiatorExclusions,
+            Request->Entries,
+            sizeof(XDOWS_SECURITY_INITIATOR_EXCLUSION) * Request->Count);
+        g_InitiatorExclusionCount = Request->Count;
+    } else {
+        g_InitiatorExclusionCount = 0;
+    }
+    ExReleasePushLockExclusive(&g_RuleSetLock);
+    KeLeaveCriticalRegion();
+
+    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
+        L"Initiator exclusion list applied.");
+    return STATUS_SUCCESS;
+}
+
+BOOLEAN
+XdowsBehaviorIsInitiatorExcluded(
+    _In_ ULONG Scope,
+    _In_opt_ PCUNICODE_STRING ActorPath,
+    _In_opt_ PCSTR ActorImageName
+    )
+{
+    ULONG i;
+    BOOLEAN excluded = FALSE;
+
+    if (!g_RuleSetLockInitialized || g_InitiatorExclusionCount == 0) {
+        return FALSE;
+    }
+
+    KeEnterCriticalRegion();
+    ExAcquirePushLockShared(&g_RuleSetLock);
+    for (i = 0; i < g_InitiatorExclusionCount; i++) {
+        PXDOWS_SECURITY_INITIATOR_EXCLUSION entry = &g_InitiatorExclusions[i];
+
+        if ((entry->ScopeMask & Scope) == 0) {
+            continue;
+        }
+        if (XdowsBehaviorPatternMatchesActor(
+                entry->Pattern,
+                ActorPath,
+                ActorImageName)) {
+            excluded = TRUE;
+            break;
+        }
+    }
+    ExReleasePushLockShared(&g_RuleSetLock);
+    KeLeaveCriticalRegion();
+    return excluded;
+}
+
+BOOLEAN
+XdowsBehaviorEvaluateCustomRules(
+    _In_opt_ PCUNICODE_STRING ActorPath,
+    _In_opt_ PCSTR ActorImageName,
+    _In_opt_ PCUNICODE_STRING CommandLine,
+    _In_opt_ PCUNICODE_STRING TargetPath,
+    _In_ ULONG Operation,
+    _In_ ULONG ActorProcessId,
+    _Out_opt_ PULONG MatchedRuleId,
+    _Out_opt_ PULONG MatchedRuleFlags,
+    _Out_opt_ PULONG MatchedBehaviorType
+    )
+{
+    WCHAR commandLower[XDOWS_BEHAVIOR_MAX_CMD_CHARS];
+    SIZE_T commandLength = 0;
+    ULONG matchedId = 0;
+    ULONG matchedFlags = 0;
+    ULONG matchedBehavior = 0;
+    ULONG matchedThreshold = 0;
+    ULONG matchedWindowMs = 0;
+    ULONG i;
+    BOOLEAN matched = FALSE;
+
+    if (MatchedRuleId != NULL) {
+        *MatchedRuleId = 0;
+    }
+    if (MatchedRuleFlags != NULL) {
+        *MatchedRuleFlags = 0;
+    }
+    if (MatchedBehaviorType != NULL) {
+        *MatchedBehaviorType = 0;
+    }
+    if (!g_RuleSetLockInitialized || g_BehaviorRuleCount == 0) {
+        return FALSE;
+    }
+
+    if (CommandLine != NULL && CommandLine->Buffer != NULL &&
+        CommandLine->Length != 0) {
+        XdowsBehaviorLowercaseInto(
+            commandLower,
+            RTL_NUMBER_OF(commandLower),
+            CommandLine);
+        commandLength = wcsnlen(commandLower, RTL_NUMBER_OF(commandLower));
+    }
+
+    KeEnterCriticalRegion();
+    ExAcquirePushLockShared(&g_RuleSetLock);
+    for (i = 0; i < g_BehaviorRuleCount; i++) {
+        PXDOWS_SECURITY_BEHAVIOR_RULE rule = &g_BehaviorRules[i];
+
+        if ((rule->Operations & Operation) == 0) {
+            continue;
+        }
+        if (!XdowsBehaviorRuleInitiatorMatches(rule, ActorPath, ActorImageName)) {
+            continue;
+        }
+        if (!XdowsBehaviorRuleCommandLineMatches(rule, commandLower, commandLength)) {
+            continue;
+        }
+        if (!XdowsBehaviorRuleTargetMatches(rule, TargetPath)) {
+            continue;
+        }
+
+        matchedId = rule->RuleId;
+        matchedFlags = rule->Flags;
+        matchedBehavior = rule->BehaviorType;
+        matchedThreshold = rule->Threshold;
+        matchedWindowMs = rule->WindowMs;
+        break;
+    }
+    ExReleasePushLockShared(&g_RuleSetLock);
+    KeLeaveCriticalRegion();
+
+    //
+    // The rate gate runs after the lock is released: KeAcquireSpinLock raises
+    // IRQL to DISPATCH_LEVEL, which must not happen while a push lock is held.
+    //
+    if (matchedId != 0 && matchedThreshold != 0 &&
+        !XdowsBehaviorRuleRateAllows(
+            matchedId,
+            ActorProcessId,
+            matchedThreshold,
+            matchedWindowMs)) {
+        matchedId = 0;
+    }
+
+    if (matchedId != 0) {
+        matched = TRUE;
+        if (MatchedRuleId != NULL) {
+            *MatchedRuleId = matchedId;
+        }
+        if (MatchedRuleFlags != NULL) {
+            *MatchedRuleFlags = matchedFlags;
+        }
+        if (MatchedBehaviorType != NULL) {
+            *MatchedBehaviorType = matchedBehavior;
+        }
+    }
+    return matched;
 }
 
 PCWSTR

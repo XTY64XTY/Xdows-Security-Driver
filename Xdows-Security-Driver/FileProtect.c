@@ -36,6 +36,7 @@ Environment:
 #include "driver.h"
 #include "RansomwareMonitor.h"
 #include "BehaviorRules.h"
+#include "InjectionProtect.h"
 #include "selfprotect.h"
 #include "codeintegrity.h"
 #include <ntstrsafe.h>
@@ -400,6 +401,165 @@ XdowsFileIsMasqueradedSystemBinary(
         }
     }
     return FALSE;
+}
+
+//
+// Map a create/write open onto the declarative rule operation vocabulary.
+// The create disposition decides between "create" and "write"; DELETE access
+// takes precedence because it is the destructive dimension a rule wants to
+// gate. FILE_OPEN_IF is reported as a write: whether the file already existed
+// is only knowable post-operation, and a write is the dominant case.
+//
+static
+ULONG
+XdowsFileClassifyOperation(
+    _In_ PFLT_CALLBACK_DATA Data
+    )
+{
+    ULONG disposition;
+
+    if (FlagOn(Data->Iopb->Parameters.Create.SecurityContext->DesiredAccess, DELETE)) {
+        return XDOWS_SECURITY_RULE_OPERATION_FILE_DELETE;
+    }
+
+    disposition = (Data->Iopb->Parameters.Create.Options >> 24) & 0x000000FF;
+    if (disposition == FILE_CREATE || disposition == FILE_SUPERSEDE) {
+        return XDOWS_SECURITY_RULE_OPERATION_FILE_CREATE;
+    }
+    return XDOWS_SECURITY_RULE_OPERATION_FILE_WRITE;
+}
+
+//
+// Declarative rule consultation for a file operation. Mirrors the autorun
+// flow: the requesting thread is held for the user-mode verdict, then the
+// operation is denied on a Block verdict, or on any infrastructure failure
+// when the rule carries FAIL_CLOSED (a rule without that flag is released on
+// failure, like the legitimate-management command rules). A rule carrying
+// KILL_ACTOR escalates a confirmed Block to a counter-kill of the requesting
+// process.
+//
+static
+BOOLEAN
+XdowsFileCustomRuleMustBeBlocked(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCUNICODE_STRING Path,
+    _In_ ULONG BehaviorType,
+    _In_ ULONG RuleId,
+    _In_ ULONG RuleFlags
+    )
+{
+    XDOWS_SECURITY_EVENT event;
+    XDOWS_SECURITY_DECISION decision;
+    NTSTATUS status;
+    ULONG originatorPid = HandleToULong(FltGetRequestorProcessIdEx(Data));
+    BOOLEAN failClosed =
+        (RuleFlags & XDOWS_SECURITY_RULE_FLAG_FAIL_CLOSED) != 0;
+
+    if (BehaviorType == (ULONG)XdowsSecurityBehaviorNone) {
+        return FALSE;
+    }
+
+    if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
+        //
+        // Cannot take the user-mode wait at raised IRQL. Honour the rule's
+        // classification: a FAIL_CLOSED rule denies, a fail-open rule passes.
+        //
+        return failClosed;
+    }
+
+    RtlZeroMemory(&event, sizeof(event));
+    RtlZeroMemory(&decision, sizeof(decision));
+    event.Header.Size = sizeof(event);
+    event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
+    event.EventId = XdowsAllocateEventId();
+    event.CorrelationId = event.EventId;
+    event.EventType = XdowsSecurityEventBehavior;
+    event.BehaviorType = BehaviorType;
+    event.Flags = XdowsSecurityEventFlagUserModeRequired |
+        XdowsSecurityEventFlagThreatConfirmed |
+        XdowsSecurityEventFlagFileOpenNameAvailable;
+    event.ProcessId = originatorPid;
+    event.CreatingProcessId = HandleToULong(PsGetCurrentProcessId());
+    event.KernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
+    XdowsFileCopyNameInto(
+        event.ImagePath,
+        XDOWS_SECURITY_MAX_PATH_CHARS,
+        Path);
+
+    //
+    // Name the rule that fired, mirroring the process-launch path, so a
+    // user-mode misconfiguration can be traced back to a specific entry.
+    //
+    {
+        WCHAR ruleMessage[128];
+
+        if (NT_SUCCESS(RtlStringCchPrintfW(
+                ruleMessage,
+                RTL_NUMBER_OF(ruleMessage),
+                L"Declarative rule %lu matched on file operation: %s",
+                RuleId,
+                XdowsBehaviorTypeName((XDOWS_SECURITY_BEHAVIOR_TYPE)BehaviorType)))) {
+            XdowsLogWrite(
+                XdowsSecurityLogWarning,
+                event.EventId,
+                event.CorrelationId,
+                L"Behavior",
+                ruleMessage);
+        }
+    }
+
+    status = XdowsQueueEventAndWait(&event, &decision);
+
+    if (!NT_SUCCESS(status) ||
+        decision.Decision == XdowsSecurityDecisionTimeout) {
+        if (!failClosed) {
+            XdowsLogWriteStatus(
+                XdowsSecurityLogWarning,
+                event.EventId,
+                event.CorrelationId,
+                L"Behavior",
+                L"Declarative file rule released (decision unavailable, fail-open)",
+                status);
+            return FALSE;
+        }
+        XdowsLogWriteStatus(
+            XdowsSecurityLogWarning,
+            event.EventId,
+            event.CorrelationId,
+            L"Behavior",
+            L"Declarative file rule denied (decision unavailable, fail-closed)",
+            status);
+        Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+        Data->IoStatus.Information = 0;
+        return TRUE;
+    }
+
+    if (decision.Decision != XdowsSecurityDecisionBlock) {
+        return FALSE;
+    }
+
+    XdowsLogWrite(
+        XdowsSecurityLogWarning,
+        event.EventId,
+        event.CorrelationId,
+        L"Behavior",
+        L"Declarative file rule blocked by user decision.");
+
+    if ((RuleFlags & XDOWS_SECURITY_RULE_FLAG_KILL_ACTOR) != 0) {
+        NTSTATUS killStatus = XdowsInjectionKillActor(originatorPid);
+
+        XdowsLogWriteStatus(
+            XdowsSecurityLogWarning,
+            event.EventId,
+            event.CorrelationId,
+            L"Behavior",
+            L"Declarative rule actor counter-kill",
+            killStatus);
+    }
+
+    Data->IoStatus.Status = STATUS_ACCESS_DENIED;
+    Data->IoStatus.Information = 0;
+    return TRUE;
 }
 
 //
@@ -1039,6 +1199,51 @@ XdowsFilePreCreate(
             XdowsFileAutorunMutationMustBeBlocked(Data, &name->Name)) {
             FltReleaseFileNameInformation(name);
             return FLT_PREOP_COMPLETE;
+        }
+
+        //
+        // Declarative rule set (capability 0x1000) for file operations, plus
+        // the FILE-scope initiator exclusion (capability 0x2000). Built-in
+        // kernel denials (critical library, masquerade) and the autorun rule
+        // run first, so a declarative rule only adds coverage. The FILE-scope
+        // exclusion relies on the requestor image leaf name: the file gate
+        // resolves no actor path on the hot path, so an exclusion written as a
+        // path suffix does not apply here (documented in the protocol doc).
+        //
+        {
+            ULONG fileOperation = XdowsFileClassifyOperation(Data);
+            ULONG originatorPid = HandleToULong(FltGetRequestorProcessIdEx(Data));
+            PEPROCESS requestor = FltGetRequestorProcess(Data);
+            PCSTR requestorImage = (requestor != NULL)
+                ? PsGetProcessImageFileName(requestor)
+                : NULL;
+            ULONG ruleId = 0;
+            ULONG ruleFlags = 0;
+            ULONG ruleBehavior = 0;
+
+            if (!XdowsBehaviorIsInitiatorExcluded(
+                    XDOWS_SECURITY_EXCLUSION_SCOPE_FILE,
+                    NULL,
+                    requestorImage) &&
+                XdowsBehaviorEvaluateCustomRules(
+                    NULL,
+                    requestorImage,
+                    NULL,
+                    &name->Name,
+                    fileOperation,
+                    originatorPid,
+                    &ruleId,
+                    &ruleFlags,
+                    &ruleBehavior) &&
+                XdowsFileCustomRuleMustBeBlocked(
+                    Data,
+                    &name->Name,
+                    ruleBehavior,
+                    ruleId,
+                    ruleFlags)) {
+                FltReleaseFileNameInformation(name);
+                return FLT_PREOP_COMPLETE;
+            }
         }
 
         if (!XdowsFileIsScannablePath(&name->Name)) {

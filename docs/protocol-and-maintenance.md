@@ -99,10 +99,81 @@ The protection-round block (same protocol version 9, additive only) adds:
   `XDOWS_SECURITY_MAX_REGISTRY_RULES = 32`; the app deploys 26 rules under
   `Recommended`, so no protocol-breaking budget increase was required.
 
+The declarative-rule block (same protocol version 9, additive only) adds:
+
+- `IOCTL_XDOWS_SECURITY_SET_BEHAVIOR_RULES` (0x811) with capability bit
+  `0x1000`, and `IOCTL_XDOWS_SECURITY_SET_INITIATOR_EXCLUSIONS` (0x812) with
+  capability bit `0x2000`. Both are opt-in downcalls; no existing struct
+  layout, enum value, or IOCTL code changed, so an older app build keeps
+  working against a newer driver and vice versa.
+- `XDOWS_SECURITY_BEHAVIOR_RULE`: a user-mode-authored rule is the tuple
+  Initiator x CommandLine x Target scoped by `Operations`, optionally
+  rate-limited by `Threshold`/`WindowMs`, optionally escalated by `Flags`.
+  `Initiator`, `Target`, and `CommandLine` are `XDOWS_SECURITY_RULE_TERM_AXIS`
+  values holding up to `XDOWS_SECURITY_MAX_RULE_TERMS` (3) terms of
+  `XDOWS_SECURITY_MAX_RULE_TERM_CHARS` (96, including the NUL) wide chars.
+  Axis semantics: `TermCount == 0` leaves the axis unconstrained; an Initiator
+  term is an image leaf name (e.g. `cmd.exe`) or, when it contains a backslash,
+  a case-insensitive actor-path **suffix**; every CommandLine term must appear
+  as a substring; Target terms are interpreted with the rule's
+  `TargetMatchKind` (`Any`/`Suffix`/`Segment`/`Prefix`/`Contains`) and the rule
+  matches when **any** target term matches. A rule that constrains no axis at
+  all is rejected.
+- The whole request is validated before anything is applied and rejected as a
+  unit, so a malformed rule can never leave a partially applied set: a rule id
+  and behavior type must be non-zero, `TargetMatchKind` must be in range,
+  `Operations` must be non-zero and inside the supported mask, `Flags` must
+  contain only known bits, `Threshold` must be 0-10000, and each term must be
+  non-empty, NUL-terminated inside its fixed buffer, and contain no literal
+  `*`/`?` wildcard (the interpreter only does literal matching, so a wildcard
+  term would silently never match and hide a configuration mistake). A
+  rejected request returns `STATUS_INVALID_PARAMETER` and leaves the previously
+  applied set untouched; the swap itself is done under the exclusive side of an
+  `EX_PUSH_LOCK` that the evaluation path holds shared.
+- Fail-open / fail-closed is now a per-rule property instead of a per-rule-id
+  hard-coded list. When the bridge or the decision round trip fails, a rule
+  **without** `XDOWS_SECURITY_RULE_FLAG_FAIL_CLOSED` (0x2) releases the
+  operation (fail-open, like the legitimate-management command rules), and a
+  rule **with** it denies. `XDOWS_SECURITY_RULE_FLAG_KILL_ACTOR` (0x1)
+  escalates a confirmed Block verdict to a counter-kill of the acting process,
+  sharing the injection guard rails (never the registered client, a critical
+  system process, a self-protected process, or PID <= 4). A rate-limited rule
+  (`Threshold > 0`) fires only after that many matches by the same process
+  inside `WindowMs` (clamped to 60000), tracked in a fixed 32-slot sliding
+  window keyed by (rule id, process id).
+- The fixed in-kernel rules are always evaluated **before** the declarative
+  set, so their fail-open/fail-closed classification is unchanged and the
+  declarative set can only add coverage, never weaken a built-in denial.
+- `XDOWS_SECURITY_INITIATOR_EXCLUSION` (up to
+  `XDOWS_SECURITY_MAX_INITIATOR_EXCLUSIONS` = 32 entries of
+  `XDOWS_SECURITY_MAX_EXCLUSION_CHARS` = 160 wide chars) suppresses the
+  user-mode consultation for the scopes named in its `ScopeMask`
+  (`Process`/`File`/`Handle`/`Registry`). A pattern is an image leaf name
+  (e.g. `steam.exe`) or, when it contains a backslash, a case-insensitive
+  actor-path suffix.
+- Exclusions are deliberately evaluated **after** every critical gate, so they
+  can never weaken protection: the handle gate applies them only after the
+  sensitive-process rights-stripping gate, the registry gate only after the
+  CI-trust gate, and the file gate only after the built-in denials and the
+  autorun rule. They also never bypass a confirmed-threat command-line rule.
+- The hot-path gates resolve only the requestor image leaf name (no actor path
+  is materialized), so a **path-suffix** exclusion pattern applies to the
+  `Process` scope only; on `File`/`Handle`/`Registry` scopes it simply does not
+  match. Author exclusions as leaf names unless only the process gate is being
+  targeted.
+- The rule set is authored in the main app as `Config\BehaviorRules.json` and
+  parsed by `DriverBehaviorRuleCatalog`; a missing file is a valid "no rules"
+  state, while a malformed file is reported (and skipped) instead of aborting
+  the attach sequence. An empty exclusion array, an `Enabled` of 0, or a
+  `RuleCount` of 0 clears the corresponding set.
+
 The main app repository must mirror the new struct/IOCTL/flags in
 `DriverProtocol.cs` and `DriverBridgeClient.cs` to use the batch drain and
 async review; older app builds keep working unchanged because every addition
-is opt-in via capability/flag bits.
+is opt-in via capability/flag bits. The declarative-rule and exclusion
+structs additionally carry a field-by-field layout assertion in
+`DriverBridgeClient` (rule 1784 bytes, request 57068 bytes, exclusion 328
+bytes) so a mirror drift fails fast instead of corrupting the downcall.
 
 Any change to `Public.h` that modifies a struct layout, enum value, IOCTL function code, string buffer length, token length, or device path requires all of the following in the same block:
 
@@ -135,6 +206,8 @@ Do not reuse old enum values for new meanings. Add new values at the end unless 
 | `IOCTL_XDOWS_SECURITY_SET_BOOT_PROTECTION` | `0x80E` | `SetBootProtection` | Configure EFI and BCD boot protection. |
 | `IOCTL_XDOWS_SECURITY_SET_REGISTRY_PROTECTION` | `0x80F` | `SetRegistryProtection` | Configure R0 registry protection rules. |
 | `IOCTL_XDOWS_SECURITY_GET_NEXT_EVENTS` | `0x810` | `GetNextEvents` | Drain up to 16 undelivered events in one call; never blocks. |
+| `IOCTL_XDOWS_SECURITY_SET_BEHAVIOR_RULES` | `0x811` | `SetBehaviorRules` | Replace the declarative behavior rule set (capability `0x1000`). Validated as a unit; a malformed request is rejected and the previous set is retained. |
+| `IOCTL_XDOWS_SECURITY_SET_INITIATOR_EXCLUSIONS` | `0x812` | `SetInitiatorExclusions` | Replace the initiator exclusion list (capability `0x2000`). Count 0 clears it. |
 
 Process management requests require both the registered, self-protected main process identity and the authorization token issued during registration. The driver rejects PID 0, PID 4, the calling main process, the protected process, and critical processes.
 
@@ -160,6 +233,18 @@ values 13-15 (destructive directory delete, ownership escalation, system
 control) remain fail-open on infrastructure failure. Behavior value 18
 (`SystemDirectoryRansomware`) is currently kernel-internal: the ransomware
 rate monitor denies flagged script hosts without emitting an event.
+
+Declarative rules (capability `0x1000`) reuse the same hold: a matched rule
+emits a `Behavior` event carrying the rule's `BehaviorType` and enters the
+user-decision hold, then denies on a Block verdict or on a user-decision
+timeout. On infrastructure failure the rule's own `FAIL_CLOSED` flag decides -
+absent the flag the operation is released and logged (fail-open), present the
+operation is denied with `STATUS_ACCESS_DENIED` (fail-closed); a rule carrying
+`KILL_ACTOR` additionally counter-kills the acting process on a confirmed
+Block. The fixed in-kernel rules run first and keep the classification
+described above. Initiator exclusions (capability `0x2000`) suppress the hold
+for the configured scopes but are evaluated after every critical gate, so an
+over-broad exclusion list degrades noise, never protection.
 
 When the bridge or model fails before a threat is confirmed, user mode allows and logs the failure. When a threat is confirmed and the user refuses or times out, the decision is Block or Timeout.
 

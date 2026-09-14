@@ -966,6 +966,21 @@ XdowsInjectionPreOperation(
     }
 
     //
+    // Initiator exclusion list (capability 0x2000), HANDLE scope: a configured
+    // heavy application (game, downloader, IME, build tool) stops reaching the
+    // user-decision window for ordinary handle requests. This check sits
+    // *after* the sensitive-process gate above, so an exclusion can never
+    // suppress the rights-stripping applied to a critical system target -- it
+    // only removes the generic consultation noise.
+    //
+    if (XdowsBehaviorIsInitiatorExcluded(
+            XDOWS_SECURITY_EXCLUSION_SCOPE_HANDLE,
+            NULL,
+            PsGetProcessImageFileName(PsGetCurrentProcess()))) {
+        return OB_PREOP_SUCCESS;
+    }
+
+    //
     // Cache hit: skip user-mode consultation for repeated allow requests.
     //
     if (XdowsInjectionLookupVerdict(

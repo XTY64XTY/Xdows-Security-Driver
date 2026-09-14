@@ -15,6 +15,7 @@ Environment:
 --*/
 
 #include "driver.h"
+#include "BehaviorRules.h"
 #include "fileprotect.h"
 #include "processmanager.h"
 #include "registryprotect.h"
@@ -555,6 +556,58 @@ Return Value:
         }
 
         status = XdowsRegistryProtectConfigure(input);
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_SET_BEHAVIOR_RULES:
+    {
+        PXDOWS_SECURITY_BEHAVIOR_RULE_REQUEST input;
+
+        status = XdowsRequireProtectedClient(Request, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = WdfRequestRetrieveInputBuffer(
+            Request,
+            sizeof(*input),
+            (PVOID*)&input,
+            NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+        if (input->Header.Size != sizeof(*input) ||
+            input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION) {
+            status = STATUS_REVISION_MISMATCH;
+            break;
+        }
+
+        status = XdowsBehaviorConfigureRules(input);
+        break;
+    }
+    case IOCTL_XDOWS_SECURITY_SET_INITIATOR_EXCLUSIONS:
+    {
+        PXDOWS_SECURITY_INITIATOR_EXCLUSION_REQUEST input;
+
+        status = XdowsRequireProtectedClient(Request, NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+
+        status = WdfRequestRetrieveInputBuffer(
+            Request,
+            sizeof(*input),
+            (PVOID*)&input,
+            NULL);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
+        if (input->Header.Size != sizeof(*input) ||
+            input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION) {
+            status = STATUS_REVISION_MISMATCH;
+            break;
+        }
+
+        status = XdowsBehaviorConfigureInitiatorExclusions(input);
         break;
     }
     case IOCTL_XDOWS_SECURITY_QUERY_PROCESSES:

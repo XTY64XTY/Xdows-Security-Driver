@@ -88,6 +88,69 @@ XdowsBehaviorImageNameIsScriptHost(
     );
 
 //
+// ---------------------------------------------------------------------------
+// Declarative rule interpreter (capability 0x1000) and initiator exclusion
+// list (capability 0x2000).
+// ---------------------------------------------------------------------------
+//
+
+//
+// Replace the declarative rule set. The whole request is validated first and
+// rejected as a unit on any malformed rule, so a partially applied set can
+// never be evaluated. Enabled == 0 or RuleCount == 0 clears the set.
+//
+NTSTATUS
+XdowsBehaviorConfigureRules(
+    _In_ PXDOWS_SECURITY_BEHAVIOR_RULE_REQUEST Request
+    );
+
+//
+// Replace the initiator exclusion list. Count == 0 clears it.
+//
+NTSTATUS
+XdowsBehaviorConfigureInitiatorExclusions(
+    _In_ PXDOWS_SECURITY_INITIATOR_EXCLUSION_REQUEST Request
+    );
+
+//
+// TRUE when the acting process matches an exclusion entry carrying Scope
+// (XDOWS_SECURITY_EXCLUSION_SCOPE_*). Callers use this to skip the user-mode
+// consultation for that gate. The critical in-kernel denials and the fixed
+// command-line threat rules are never bypassed by an exclusion.
+//
+BOOLEAN
+XdowsBehaviorIsInitiatorExcluded(
+    _In_ ULONG Scope,
+    _In_opt_ PCUNICODE_STRING ActorPath,
+    _In_opt_ PCSTR ActorImageName
+    );
+
+//
+// Evaluate the declarative rule set for one operation.
+//
+// ActorPath/ActorImageName describe the acting process, CommandLine and
+// TargetPath are optional (NULL when the operation has no such dimension),
+// Operation is one XDOWS_SECURITY_RULE_OPERATION_* value, and ActorProcessId
+// keys the per-process rate window for rules that declare a Threshold.
+//
+// Returns TRUE when a rule matched (after the optional rate gate) and fills
+// the out parameters with the rule id, its flags, and the behavior type the
+// match must be reported as. Safe at PASSIVE_LEVEL.
+//
+BOOLEAN
+XdowsBehaviorEvaluateCustomRules(
+    _In_opt_ PCUNICODE_STRING ActorPath,
+    _In_opt_ PCSTR ActorImageName,
+    _In_opt_ PCUNICODE_STRING CommandLine,
+    _In_opt_ PCUNICODE_STRING TargetPath,
+    _In_ ULONG Operation,
+    _In_ ULONG ActorProcessId,
+    _Out_opt_ PULONG MatchedRuleId,
+    _Out_opt_ PULONG MatchedRuleFlags,
+    _Out_opt_ PULONG MatchedBehaviorType
+    );
+
+//
 // Convert a behavior type to a human-readable wide string for logging.
 //
 PCWSTR
