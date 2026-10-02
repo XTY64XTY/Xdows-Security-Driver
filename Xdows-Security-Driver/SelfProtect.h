@@ -2,16 +2,16 @@
 
 EXTERN_C_START
 
-NTSTATUS XdowsSelfProtectInitialize(VOID);
-VOID XdowsSelfProtectShutdown(VOID);
-NTSTATUS XdowsSelfProtectRegisterProcess(_In_ ULONG ProcessId, _In_ ULONG MainThreadId, _In_ ULONG Flags);
-NTSTATUS XdowsSelfProtectSetVoluntaryExit(_In_ ULONG ProcessId, _In_ BOOLEAN IsVoluntaryExit);
-VOID XdowsSelfProtectClearRegistration(VOID);
-BOOLEAN XdowsSelfProtectIsProcessProtected(_In_ HANDLE ProcessId);
-BOOLEAN XdowsSelfProtectIsClientImageAllowed(_In_ PCUNICODE_STRING ImagePath);
-NTSTATUS XdowsSelfProtectSetStartupProtection(_In_ ULONG ProcessId, _In_ BOOLEAN Enabled);
-BOOLEAN XdowsSelfProtectIsStartupProtectionEnabled(VOID);
-BOOLEAN XdowsSelfProtectShouldBlockFileMutation(
+NTSTATUS SelfProtectInitialize(VOID);
+VOID SelfProtectShutdown(VOID);
+NTSTATUS SelfProtectRegisterProcess(_In_ ULONG ProcessId, _In_ ULONG MainThreadId, _In_ ULONG Flags);
+NTSTATUS SelfProtectSetVoluntaryExit(_In_ ULONG ProcessId, _In_ BOOLEAN IsVoluntaryExit);
+VOID SelfProtectClearRegistration(VOID);
+BOOLEAN SelfProtectIsProcessProtected(_In_ HANDLE ProcessId);
+BOOLEAN SelfProtectIsClientImageAllowed(_In_ PCUNICODE_STRING ImagePath);
+NTSTATUS SelfProtectSetStartupProtection(_In_ ULONG ProcessId, _In_ BOOLEAN Enabled);
+BOOLEAN SelfProtectIsStartupProtectionEnabled(VOID);
+BOOLEAN SelfProtectShouldBlockFileMutation(
     _In_ PCUNICODE_STRING Path,
     _In_ HANDLE RequestorProcessId);
 

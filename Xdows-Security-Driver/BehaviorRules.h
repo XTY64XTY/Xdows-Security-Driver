@@ -33,17 +33,17 @@ EXTERN_C_START
 // the same stable numeric values as the kernel rule engine.
 
 NTSTATUS
-XdowsBehaviorProtectInitialize(
+BehaviorProtectInitialize(
     VOID
     );
 
 VOID
-XdowsBehaviorProtectShutdown(
+BehaviorProtectShutdown(
     VOID
     );
 
 BOOLEAN
-XdowsBehaviorProtectIsEnabled(
+BehaviorProtectIsEnabled(
     VOID
     );
 
@@ -55,7 +55,7 @@ XdowsBehaviorProtectIsEnabled(
 // command line buffer before this function returns.
 //
 XDOWS_SECURITY_BEHAVIOR_TYPE
-XdowsBehaviorInspectCommandLine(
+BehaviorInspectCommandLine(
     _In_opt_ PCUNICODE_STRING CommandLine
     );
 
@@ -70,7 +70,7 @@ XdowsBehaviorInspectCommandLine(
 // PASSIVE_LEVEL; performs a bounded PID->image lookup.
 //
 XDOWS_SECURITY_BEHAVIOR_TYPE
-XdowsBehaviorInspectParentChain(
+BehaviorInspectParentChain(
     _In_ ULONG ParentProcessId,
     _In_ PCUNICODE_STRING ChildImageName
     );
@@ -83,7 +83,7 @@ XdowsBehaviorInspectParentChain(
 // Comparison is bounded to 15 chars and case-insensitive.
 //
 BOOLEAN
-XdowsBehaviorImageNameIsScriptHost(
+BehaviorImageNameIsScriptHost(
     _In_ PCSTR ImageName
     );
 
@@ -100,7 +100,7 @@ XdowsBehaviorImageNameIsScriptHost(
 // never be evaluated. Enabled == 0 or RuleCount == 0 clears the set.
 //
 NTSTATUS
-XdowsBehaviorConfigureRules(
+BehaviorConfigureRules(
     _In_ PXDOWS_SECURITY_BEHAVIOR_RULE_REQUEST Request
     );
 
@@ -108,7 +108,7 @@ XdowsBehaviorConfigureRules(
 // Replace the initiator exclusion list. Count == 0 clears it.
 //
 NTSTATUS
-XdowsBehaviorConfigureInitiatorExclusions(
+BehaviorConfigureInitiatorExclusions(
     _In_ PXDOWS_SECURITY_INITIATOR_EXCLUSION_REQUEST Request
     );
 
@@ -119,7 +119,7 @@ XdowsBehaviorConfigureInitiatorExclusions(
 // command-line threat rules are never bypassed by an exclusion.
 //
 BOOLEAN
-XdowsBehaviorIsInitiatorExcluded(
+BehaviorIsInitiatorExcluded(
     _In_ ULONG Scope,
     _In_opt_ PCUNICODE_STRING ActorPath,
     _In_opt_ PCSTR ActorImageName
@@ -138,7 +138,7 @@ XdowsBehaviorIsInitiatorExcluded(
 // match must be reported as. Safe at PASSIVE_LEVEL.
 //
 BOOLEAN
-XdowsBehaviorEvaluateCustomRules(
+BehaviorEvaluateCustomRules(
     _In_opt_ PCUNICODE_STRING ActorPath,
     _In_opt_ PCSTR ActorImageName,
     _In_opt_ PCUNICODE_STRING CommandLine,
@@ -154,7 +154,7 @@ XdowsBehaviorEvaluateCustomRules(
 // Convert a behavior type to a human-readable wide string for logging.
 //
 PCWSTR
-XdowsBehaviorTypeName(
+BehaviorTypeName(
     _In_ XDOWS_SECURITY_BEHAVIOR_TYPE Type
     );
 

@@ -81,69 +81,69 @@ typedef struct _XDOWS_DRIVER_CONTEXT {
     volatile BOOLEAN AsyncReviewEnabled;
 } XDOWS_DRIVER_CONTEXT, *PXDOWS_DRIVER_CONTEXT;
 
-extern XDOWS_DRIVER_CONTEXT g_XdowsDriverContext;
+extern XDOWS_DRIVER_CONTEXT g_DriverContext;
 
 NTSTATUS
-XdowsInitializeGlobalContext(
+InitializeGlobalContext(
     _In_ WDFDEVICE Device
     );
 
 VOID
-XdowsShutdownGlobalContext(
+ShutdownGlobalContext(
     VOID
     );
 
 NTSTATUS
-XdowsRegisterClient(
+RegisterClient(
     _In_ PXDOWS_SECURITY_REGISTER_REQUEST Request,
     _In_ ULONG RequestorProcessId,
     _Out_ PXDOWS_SECURITY_REGISTER_RESPONSE Response
     );
 
 BOOLEAN
-XdowsIsRegisteredClientProcess(
+IsRegisteredClientProcess(
     _In_ ULONG ProcessId
     );
 
 VOID
-XdowsDisconnectClient(
+DisconnectClient(
     VOID
     );
 
 NTSTATUS
-XdowsHeartbeat(
+Heartbeat(
     _In_ PXDOWS_SECURITY_HEARTBEAT_REQUEST Request
     );
 
 NTSTATUS
-XdowsGetNextPendingEvent(
+GetNextPendingEvent(
     _Out_ PXDOWS_SECURITY_EVENT Event
     );
 
 NTSTATUS
-XdowsGetNextPendingEventsBatch(
+GetNextPendingEventsBatch(
     _Out_ PXDOWS_SECURITY_EVENT_BATCH Batch,
     _In_ ULONG OutputBufferLength
     );
 
 NTSTATUS
-XdowsSubmitDecision(
+SubmitDecision(
     _In_ PXDOWS_SECURITY_DECISION Decision
     );
 
 NTSTATUS
-XdowsQueueEventAndWait(
+QueueEventAndWait(
     _Inout_ PXDOWS_SECURITY_EVENT Event,
     _Out_ PXDOWS_SECURITY_DECISION Decision
     );
 
 VOID
-XdowsGetState(
+GetState(
     _Out_ PXDOWS_SECURITY_STATE State
     );
 
 ULONGLONG
-XdowsAllocateEventId(
+AllocateEventId(
     VOID
     );
 

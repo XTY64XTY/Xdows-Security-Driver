@@ -220,8 +220,8 @@ XdowsSecurityDriverEvtDriverUnload(
     (VOID)InterlockedExchange(&g_DriverUnloadGuard.Initialized, 0);
     g_DriverUnloadGuard.DriverObject = NULL;
     g_DriverUnloadGuard.FrameworkUnload = NULL;
-    XdowsModulesShutdown();
-    XdowsShutdownGlobalContext();
+    ModulesShutdown();
+    ShutdownGlobalContext();
 }
 
 VOID

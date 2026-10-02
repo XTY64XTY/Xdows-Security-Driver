@@ -2,13 +2,13 @@
 
 EXTERN_C_START
 
-NTSTATUS XdowsFileProtectInitialize(VOID);
-VOID XdowsFileProtectShutdown(VOID);
-VOID XdowsFileProtectAuthorizeUnload(VOID);
-VOID XdowsFileProtectRevokeUnload(VOID);
-BOOLEAN XdowsFileProtectIsPathScannable(_In_opt_ PCUNICODE_STRING Path);
-NTSTATUS XdowsFileProtectConfigureBootProtection(
+NTSTATUS FileProtectInitialize(VOID);
+VOID FileProtectShutdown(VOID);
+VOID FileProtectAuthorizeUnload(VOID);
+VOID FileProtectRevokeUnload(VOID);
+BOOLEAN FileProtectIsPathScannable(_In_opt_ PCUNICODE_STRING Path);
+NTSTATUS FileProtectConfigureBootProtection(
     _In_ PXDOWS_SECURITY_BOOT_PROTECTION_REQUEST Request);
-BOOLEAN XdowsFileProtectIsBootProtectionEnabled(VOID);
+BOOLEAN FileProtectIsBootProtectionEnabled(VOID);
 
 EXTERN_C_END

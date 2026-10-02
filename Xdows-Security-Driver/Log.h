@@ -4,16 +4,16 @@
 
 EXTERN_C_START
 
-NTSTATUS XdowsLogInitialize(VOID);
-VOID XdowsLogShutdown(VOID);
-VOID XdowsLogWrite(
+NTSTATUS LogInitialize(VOID);
+VOID LogShutdown(VOID);
+VOID LogWrite(
     _In_ ULONG Severity,
     _In_ ULONGLONG EventId,
     _In_ ULONGLONG CorrelationId,
     _In_z_ PCWSTR Module,
     _In_z_ PCWSTR Message
     );
-VOID XdowsLogWriteStatus(
+VOID LogWriteStatus(
     _In_ ULONG Severity,
     _In_ ULONGLONG EventId,
     _In_ ULONGLONG CorrelationId,
@@ -21,7 +21,7 @@ VOID XdowsLogWriteStatus(
     _In_z_ PCWSTR Operation,
     _In_ NTSTATUS Status
     );
-NTSTATUS XdowsLogGetNext(
+NTSTATUS LogGetNext(
     _Out_ PXDOWS_SECURITY_LOG_ENTRY Entry
     );
 

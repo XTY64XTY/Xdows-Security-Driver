@@ -44,9 +44,9 @@ Environment:
 // a single value, making the one-time semantics impossible to misuse.
 //
 typedef enum _XDOWS_TOKEN_LIFECYCLE {
-    XdowsTokenLifecycleEmpty = 0,
-    XdowsTokenLifecycleArmed,
-    XdowsTokenLifecycleIssued
+    TokenLifecycleEmpty = 0,
+    TokenLifecycleArmed,
+    TokenLifecycleIssued
 } XDOWS_TOKEN_LIFECYCLE;
 
 typedef struct _XDOWS_TOKEN_AUTH_CONTEXT {
@@ -67,7 +67,7 @@ static XDOWS_TOKEN_AUTH_CONTEXT g_TokenAuthContext;
 //
 static
 NTSTATUS
-XdowsTokenAuthDigestBytes(
+TokenAuthDigestBytes(
     _In_reads_bytes_(Length) PCUCHAR Data,
     _In_ ULONG Length,
     _Out_writes_bytes_(XDOWS_TOKEN_DIGEST_BYTES) PUCHAR Digest
@@ -103,7 +103,7 @@ XdowsTokenAuthDigestBytes(
 //
 static
 VOID
-XdowsTokenAuthEncodeHex(
+TokenAuthEncodeHex(
     _In_reads_(XDOWS_TOKEN_SEED_BYTES) PCUCHAR Seed,
     _Out_writes_(XDOWS_SECURITY_TOKEN_CHARS + 1) PWCHAR Text
     )
@@ -120,7 +120,7 @@ XdowsTokenAuthEncodeHex(
 
 static
 VOID
-XdowsTokenAuthSecureWipe(
+TokenAuthSecureWipe(
     _Inout_updates_bytes_(Length) PUCHAR Buffer,
     _In_ SIZE_T Length
     )
@@ -131,7 +131,7 @@ XdowsTokenAuthSecureWipe(
 }
 
 NTSTATUS
-XdowsTokenAuthInitialize(
+TokenAuthInitialize(
     VOID
     )
 {
@@ -140,50 +140,50 @@ XdowsTokenAuthInitialize(
 
     RtlZeroMemory(&g_TokenAuthContext, sizeof(g_TokenAuthContext));
     ExInitializePushLock(&g_TokenAuthContext.Lock);
-    g_TokenAuthContext.State = XdowsTokenLifecycleEmpty;
+    g_TokenAuthContext.State = TokenLifecycleEmpty;
 
     status = BCryptGenRandom(NULL, seed, sizeof(seed), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
     if (!NT_SUCCESS(status)) {
-        XdowsTokenAuthSecureWipe(seed, sizeof(seed));
-        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"TokenAuth",
+        TokenAuthSecureWipe(seed, sizeof(seed));
+        LogWriteStatus(XdowsSecurityLogError, 0, 0, L"TokenAuth",
             L"Random seed generation failed", status);
         return status;
     }
 
-    XdowsTokenAuthEncodeHex(seed, g_TokenAuthContext.Plaintext);
+    TokenAuthEncodeHex(seed, g_TokenAuthContext.Plaintext);
 
-    status = XdowsTokenAuthDigestBytes(
+    status = TokenAuthDigestBytes(
         (PUCHAR)g_TokenAuthContext.Plaintext,
         XDOWS_SECURITY_TOKEN_CHARS * sizeof(WCHAR),
         g_TokenAuthContext.Digest);
     if (!NT_SUCCESS(status)) {
-        XdowsTokenAuthSecureWipe(seed, sizeof(seed));
-        XdowsTokenAuthSecureWipe((PUCHAR)g_TokenAuthContext.Plaintext,
+        TokenAuthSecureWipe(seed, sizeof(seed));
+        TokenAuthSecureWipe((PUCHAR)g_TokenAuthContext.Plaintext,
             sizeof(g_TokenAuthContext.Plaintext));
-        XdowsTokenAuthSecureWipe(g_TokenAuthContext.Digest,
+        TokenAuthSecureWipe(g_TokenAuthContext.Digest,
             sizeof(g_TokenAuthContext.Digest));
-        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"TokenAuth",
+        LogWriteStatus(XdowsSecurityLogError, 0, 0, L"TokenAuth",
             L"Token digest computation failed", status);
         return status;
     }
 
-    XdowsTokenAuthSecureWipe(seed, sizeof(seed));
-    g_TokenAuthContext.State = XdowsTokenLifecycleArmed;
+    TokenAuthSecureWipe(seed, sizeof(seed));
+    g_TokenAuthContext.State = TokenLifecycleArmed;
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Shutdown token armed.");
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Shutdown token armed.");
     return STATUS_SUCCESS;
 }
 
 VOID
-XdowsTokenAuthShutdown(
+TokenAuthShutdown(
     VOID
     )
 {
-    XdowsTokenAuthInvalidate();
+    TokenAuthInvalidate();
 }
 
 NTSTATUS
-XdowsTokenAuthCopyOneTimeToken(
+TokenAuthCopyOneTimeToken(
     _Out_writes_(TokenChars) PWCHAR Token,
     _In_ ULONG TokenChars
     )
@@ -202,27 +202,27 @@ XdowsTokenAuthCopyOneTimeToken(
     // Validate never observes a half-issued token.
     //
     ExAcquirePushLockExclusive(&g_TokenAuthContext.Lock);
-    if (g_TokenAuthContext.State == XdowsTokenLifecycleArmed) {
+    if (g_TokenAuthContext.State == TokenLifecycleArmed) {
         RtlCopyMemory(Token, g_TokenAuthContext.Plaintext,
             XDOWS_SECURITY_TOKEN_CHARS * sizeof(WCHAR));
         Token[XDOWS_SECURITY_TOKEN_CHARS] = UNICODE_NULL;
 
-        XdowsTokenAuthSecureWipe((PUCHAR)g_TokenAuthContext.Plaintext,
+        TokenAuthSecureWipe((PUCHAR)g_TokenAuthContext.Plaintext,
             sizeof(g_TokenAuthContext.Plaintext));
-        g_TokenAuthContext.State = XdowsTokenLifecycleIssued;
+        g_TokenAuthContext.State = TokenLifecycleIssued;
         status = STATUS_SUCCESS;
     }
     ExReleasePushLockExclusive(&g_TokenAuthContext.Lock);
 
     if (NT_SUCCESS(status)) {
-        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth",
+        LogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth",
             L"Shutdown token issued to registered client.");
     }
     return status;
 }
 
 BOOLEAN
-XdowsTokenAuthValidate(
+TokenAuthValidate(
     _In_reads_z_(XDOWS_SECURITY_TOKEN_CHARS + 1) PCWSTR Token
     )
 {
@@ -251,7 +251,7 @@ XdowsTokenAuthValidate(
     // Candidate digest is computed outside the lock so the shared lock only
     // guards the 32-byte comparison, keeping contention negligible.
     //
-    status = XdowsTokenAuthDigestBytes(
+    status = TokenAuthDigestBytes(
         (PUCHAR)Token,
         XDOWS_SECURITY_TOKEN_CHARS * sizeof(WCHAR),
         candidate);
@@ -260,7 +260,7 @@ XdowsTokenAuthValidate(
     }
 
     ExAcquirePushLockShared(&g_TokenAuthContext.Lock);
-    if (g_TokenAuthContext.State != XdowsTokenLifecycleEmpty) {
+    if (g_TokenAuthContext.State != TokenLifecycleEmpty) {
         //
         // Constant-time compare: accumulate XOR across all bytes so the loop
         // body does not branch on secret data.
@@ -272,31 +272,31 @@ XdowsTokenAuthValidate(
     }
     ExReleasePushLockShared(&g_TokenAuthContext.Lock);
 
-    XdowsTokenAuthSecureWipe(candidate, sizeof(candidate));
+    TokenAuthSecureWipe(candidate, sizeof(candidate));
     return verdict;
 }
 
 VOID
-XdowsTokenAuthInvalidate(
+TokenAuthInvalidate(
     VOID
     )
 {
     ExAcquirePushLockExclusive(&g_TokenAuthContext.Lock);
-    XdowsTokenAuthSecureWipe((PUCHAR)g_TokenAuthContext.Plaintext,
+    TokenAuthSecureWipe((PUCHAR)g_TokenAuthContext.Plaintext,
         sizeof(g_TokenAuthContext.Plaintext));
-    XdowsTokenAuthSecureWipe(g_TokenAuthContext.Digest,
+    TokenAuthSecureWipe(g_TokenAuthContext.Digest,
         sizeof(g_TokenAuthContext.Digest));
-    g_TokenAuthContext.State = XdowsTokenLifecycleEmpty;
+    g_TokenAuthContext.State = TokenLifecycleEmpty;
     ExReleasePushLockExclusive(&g_TokenAuthContext.Lock);
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Shutdown token cleared.");
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Shutdown token cleared.");
 }
 
 NTSTATUS
-XdowsTokenAuthRotate(
+TokenAuthRotate(
     VOID
     )
 {
-    XdowsTokenAuthInvalidate();
-    return XdowsTokenAuthInitialize();
+    TokenAuthInvalidate();
+    return TokenAuthInitialize();
 }

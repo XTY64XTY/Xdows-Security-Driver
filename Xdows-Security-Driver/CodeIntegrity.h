@@ -23,21 +23,21 @@ EXTERN_C_START
 
 //
 // Resolve the ci.dll exports. Never fails the caller: when CI cannot be
-// used, XdowsCodeIntegrityIsAvailable() returns FALSE and callers must fall
+// used, CodeIntegrityIsAvailable() returns FALSE and callers must fall
 // back to their own policy.
 //
 NTSTATUS
-XdowsCodeIntegrityInitialize(
+CodeIntegrityInitialize(
     VOID
     );
 
 VOID
-XdowsCodeIntegrityShutdown(
+CodeIntegrityShutdown(
     VOID
     );
 
 BOOLEAN
-XdowsCodeIntegrityIsAvailable(
+CodeIntegrityIsAvailable(
     VOID
     );
 
@@ -49,7 +49,7 @@ XdowsCodeIntegrityIsAvailable(
 // unsigned.
 //
 BOOLEAN
-XdowsCodeIntegrityQueryProcessTrust(
+CodeIntegrityQueryProcessTrust(
     _In_ PEPROCESS Process,
     _Out_ PBOOLEAN Trusted
     );

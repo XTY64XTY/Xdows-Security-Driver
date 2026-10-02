@@ -20,42 +20,42 @@ Abstract:
 #include "tokenauth.h"
 
 typedef enum _XDOWS_MODULE_INDEX {
-    XdowsModuleLog = 0,
-    XdowsModuleTokenAuth,
-    XdowsModuleBehavior,
-    XdowsModuleProcess,
-    XdowsModuleFile,
-    XdowsModuleInjection,
-    XdowsModuleSelf,
-    XdowsModuleRegistry,
-    XdowsModuleCount
+    ModuleLog = 0,
+    ModuleTokenAuth,
+    ModuleBehavior,
+    ModuleProcess,
+    ModuleFile,
+    ModuleInjection,
+    ModuleSelf,
+    ModuleRegistry,
+    ModuleCount
 } XDOWS_MODULE_INDEX;
 
-static BOOLEAN g_ModuleStarted[XdowsModuleCount];
+static BOOLEAN g_ModuleStarted[ModuleCount];
 static volatile LONG g_ActiveModuleMask;
 
 typedef NTSTATUS (*XDOWS_MODULE_INITIALIZER)(VOID);
 
 static
 ULONG
-XdowsModuleBit(
+ModuleBit(
     _In_ XDOWS_MODULE_INDEX Index
     )
 {
     switch (Index) {
-    case XdowsModuleTokenAuth:
+    case ModuleTokenAuth:
         return XDOWS_SECURITY_MODULE_TOKEN_AUTH;
-    case XdowsModuleBehavior:
+    case ModuleBehavior:
         return XDOWS_SECURITY_MODULE_BEHAVIOR;
-    case XdowsModuleProcess:
+    case ModuleProcess:
         return XDOWS_SECURITY_MODULE_PROCESS;
-    case XdowsModuleFile:
+    case ModuleFile:
         return XDOWS_SECURITY_MODULE_FILE;
-    case XdowsModuleInjection:
+    case ModuleInjection:
         return XDOWS_SECURITY_MODULE_INJECTION;
-    case XdowsModuleSelf:
+    case ModuleSelf:
         return XDOWS_SECURITY_MODULE_SELF_PROTECT;
-    case XdowsModuleRegistry:
+    case ModuleRegistry:
         return XDOWS_SECURITY_MODULE_REGISTRY;
     default:
         return 0;
@@ -64,14 +64,14 @@ XdowsModuleBit(
 
 static
 VOID
-XdowsMarkStarted(
+MarkStarted(
     _In_ XDOWS_MODULE_INDEX Index
     )
 {
     ULONG bit;
 
     g_ModuleStarted[Index] = TRUE;
-    bit = XdowsModuleBit(Index);
+    bit = ModuleBit(Index);
     if (bit != 0) {
         (VOID)InterlockedOr(&g_ActiveModuleMask, (LONG)bit);
     }
@@ -79,14 +79,14 @@ XdowsMarkStarted(
 
 static
 VOID
-XdowsMarkStopped(
+MarkStopped(
     _In_ XDOWS_MODULE_INDEX Index
     )
 {
     ULONG bit;
 
     g_ModuleStarted[Index] = FALSE;
-    bit = XdowsModuleBit(Index);
+    bit = ModuleBit(Index);
     if (bit != 0) {
         (VOID)InterlockedAnd(&g_ActiveModuleMask, ~(LONG)bit);
     }
@@ -94,7 +94,7 @@ XdowsMarkStopped(
 
 static
 VOID
-XdowsTryStartModule(
+TryStartModule(
     _In_ XDOWS_MODULE_INDEX Index,
     _In_z_ PCWSTR Name,
     _In_ XDOWS_MODULE_INITIALIZER Initializer
@@ -104,11 +104,11 @@ XdowsTryStartModule(
 
     status = Initializer();
     if (NT_SUCCESS(status)) {
-        XdowsMarkStarted(Index);
+        MarkStarted(Index);
         return;
     }
 
-    XdowsLogWriteStatus(
+    LogWriteStatus(
         XdowsSecurityLogWarning,
         0,
         0,
@@ -118,7 +118,7 @@ XdowsTryStartModule(
 }
 
 NTSTATUS
-XdowsModulesInitialize(
+ModulesInitialize(
     VOID
     )
 {
@@ -127,75 +127,75 @@ XdowsModulesInitialize(
     RtlZeroMemory(g_ModuleStarted, sizeof(g_ModuleStarted));
     (VOID)InterlockedExchange(&g_ActiveModuleMask, 0);
 
-    status = XdowsLogInitialize();
+    status = LogInitialize();
     if (!NT_SUCCESS(status)) {
         goto Fail;
     }
-    XdowsMarkStarted(XdowsModuleLog);
+    MarkStarted(ModuleLog);
 
-    XdowsTryStartModule(XdowsModuleTokenAuth, L"TokenAuth", XdowsTokenAuthInitialize);
-    XdowsTryStartModule(XdowsModuleBehavior, L"Behavior", XdowsBehaviorProtectInitialize);
-    XdowsTryStartModule(XdowsModuleProcess, L"Process", XdowsProcessProtectInitialize);
-    XdowsTryStartModule(XdowsModuleFile, L"File", XdowsFileProtectInitialize);
-    XdowsTryStartModule(XdowsModuleInjection, L"Injection", XdowsInjectionProtectInitialize);
-    XdowsTryStartModule(XdowsModuleSelf, L"SelfProtect", XdowsSelfProtectInitialize);
-    XdowsTryStartModule(XdowsModuleRegistry, L"RegistryProtect", XdowsRegistryProtectInitialize);
+    TryStartModule(ModuleTokenAuth, L"TokenAuth", TokenAuthInitialize);
+    TryStartModule(ModuleBehavior, L"Behavior", BehaviorProtectInitialize);
+    TryStartModule(ModuleProcess, L"Process", ProcessProtectInitialize);
+    TryStartModule(ModuleFile, L"File", FileProtectInitialize);
+    TryStartModule(ModuleInjection, L"Injection", InjectionProtectInitialize);
+    TryStartModule(ModuleSelf, L"SelfProtect", SelfProtectInitialize);
+    TryStartModule(ModuleRegistry, L"RegistryProtect", RegistryProtectInitialize);
 
     return STATUS_SUCCESS;
 
 Fail:
-    XdowsModulesShutdown();
+    ModulesShutdown();
     return status;
 }
 
 VOID
-XdowsModulesShutdown(
+ModulesShutdown(
     VOID
     )
 {
-    if (g_ModuleStarted[XdowsModuleRegistry]) {
-        XdowsRegistryProtectShutdown();
-        XdowsMarkStopped(XdowsModuleRegistry);
+    if (g_ModuleStarted[ModuleRegistry]) {
+        RegistryProtectShutdown();
+        MarkStopped(ModuleRegistry);
     }
 
-    if (g_ModuleStarted[XdowsModuleSelf]) {
-        XdowsSelfProtectShutdown();
-        XdowsMarkStopped(XdowsModuleSelf);
+    if (g_ModuleStarted[ModuleSelf]) {
+        SelfProtectShutdown();
+        MarkStopped(ModuleSelf);
     }
 
-    if (g_ModuleStarted[XdowsModuleInjection]) {
-        XdowsInjectionProtectShutdown();
-        XdowsMarkStopped(XdowsModuleInjection);
+    if (g_ModuleStarted[ModuleInjection]) {
+        InjectionProtectShutdown();
+        MarkStopped(ModuleInjection);
     }
 
-    if (g_ModuleStarted[XdowsModuleFile]) {
-        XdowsFileProtectShutdown();
-        XdowsMarkStopped(XdowsModuleFile);
+    if (g_ModuleStarted[ModuleFile]) {
+        FileProtectShutdown();
+        MarkStopped(ModuleFile);
     }
 
-    if (g_ModuleStarted[XdowsModuleProcess]) {
-        XdowsProcessProtectShutdown();
-        XdowsMarkStopped(XdowsModuleProcess);
+    if (g_ModuleStarted[ModuleProcess]) {
+        ProcessProtectShutdown();
+        MarkStopped(ModuleProcess);
     }
 
-    if (g_ModuleStarted[XdowsModuleBehavior]) {
-        XdowsBehaviorProtectShutdown();
-        XdowsMarkStopped(XdowsModuleBehavior);
+    if (g_ModuleStarted[ModuleBehavior]) {
+        BehaviorProtectShutdown();
+        MarkStopped(ModuleBehavior);
     }
 
-    if (g_ModuleStarted[XdowsModuleTokenAuth]) {
-        XdowsTokenAuthShutdown();
-        XdowsMarkStopped(XdowsModuleTokenAuth);
+    if (g_ModuleStarted[ModuleTokenAuth]) {
+        TokenAuthShutdown();
+        MarkStopped(ModuleTokenAuth);
     }
 
-    if (g_ModuleStarted[XdowsModuleLog]) {
-        XdowsLogShutdown();
-        g_ModuleStarted[XdowsModuleLog] = FALSE;
+    if (g_ModuleStarted[ModuleLog]) {
+        LogShutdown();
+        g_ModuleStarted[ModuleLog] = FALSE;
     }
 }
 
 ULONG
-XdowsModulesGetActiveMask(
+ModulesGetActiveMask(
     VOID
     )
 {

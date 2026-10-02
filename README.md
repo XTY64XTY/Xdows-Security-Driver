@@ -65,7 +65,7 @@ Query state:
 
 ```powershell
 sc query Xdows-Security-Driver
-pnputil /enum-drivers | findstr /i Xdows
+pnputil /enum-drivers | findstr /i Xdows Security
 ```
 
 Uninstall:

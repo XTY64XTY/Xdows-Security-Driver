@@ -2,8 +2,8 @@
 
 EXTERN_C_START
 
-NTSTATUS XdowsInjectionProtectInitialize(VOID);
-VOID XdowsInjectionProtectShutdown(VOID);
+NTSTATUS InjectionProtectInitialize(VOID);
+VOID InjectionProtectShutdown(VOID);
 
 //
 // Counter-terminate the acting process after a user-confirmed Block verdict
@@ -16,7 +16,7 @@ VOID XdowsInjectionProtectShutdown(VOID);
 // duplicating the guard logic.
 //
 NTSTATUS
-XdowsInjectionKillActor(
+InjectionKillActor(
     _In_ ULONG ActorProcessId
     );
 

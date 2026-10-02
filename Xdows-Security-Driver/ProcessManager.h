@@ -2,11 +2,11 @@
 
 EXTERN_C_START
 
-NTSTATUS XdowsProcessManagerQuery(
+NTSTATUS ProcessManagerQuery(
     _In_ PXDOWS_SECURITY_PROCESS_QUERY_REQUEST Request,
     _Out_ PXDOWS_SECURITY_PROCESS_QUERY_RESPONSE Response);
 
-NTSTATUS XdowsProcessManagerOperate(
+NTSTATUS ProcessManagerOperate(
     _In_ ULONG RequestorProcessId,
     _In_ PXDOWS_SECURITY_PROCESS_OPERATION_REQUEST Request);
 

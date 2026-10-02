@@ -21,22 +21,22 @@ Environment:
 EXTERN_C_START
 
 NTSTATUS
-XdowsRegistryProtectInitialize(
+RegistryProtectInitialize(
     VOID
     );
 
 VOID
-XdowsRegistryProtectShutdown(
+RegistryProtectShutdown(
     VOID
     );
 
 NTSTATUS
-XdowsRegistryProtectConfigure(
+RegistryProtectConfigure(
     _In_ PXDOWS_SECURITY_REGISTRY_PROTECTION_REQUEST Request
     );
 
 BOOLEAN
-XdowsRegistryProtectIsEnabled(
+RegistryProtectIsEnabled(
     VOID
     );
 

@@ -223,7 +223,7 @@ static XDOWS_CI_CONTEXT g_CodeIntegrity;
 
 static
 PVOID
-XdowsCiGetSystemRoutine(
+CiGetSystemRoutine(
     _In_z_ PCWSTR Name
     )
 {
@@ -235,7 +235,7 @@ XdowsCiGetSystemRoutine(
 
 static
 NTSTATUS
-XdowsCiFindModule(
+CiFindModule(
     _In_z_ PCSTR ModuleName,
     _Out_ PVOID* ImageBase,
     _Out_ PULONG ImageSize
@@ -330,7 +330,7 @@ XdowsCiFindModule(
 
 static
 PVOID
-XdowsCiResolveExport(
+CiResolveExport(
     _In_ PVOID ImageBase,
     _In_ ULONG ImageSize,
     _In_z_ PCSTR FunctionName
@@ -422,7 +422,7 @@ XdowsCiResolveExport(
 
 static
 BOOLEAN
-XdowsCiLookupVerdict(
+CiLookupVerdict(
     _In_ ULONG ProcessId,
     _In_ ULONGLONG CreateTime,
     _Out_ PBOOLEAN Trusted
@@ -453,7 +453,7 @@ XdowsCiLookupVerdict(
 
 static
 VOID
-XdowsCiRecordVerdict(
+CiRecordVerdict(
     _In_ ULONG ProcessId,
     _In_ ULONGLONG CreateTime,
     _In_ BOOLEAN Trusted
@@ -498,7 +498,7 @@ XdowsCiRecordVerdict(
 
 static
 VOID
-XdowsCiRemoveVerdict(
+CiRemoveVerdict(
     _In_ ULONG ProcessId,
     _In_ ULONGLONG CreateTime
     )
@@ -521,7 +521,7 @@ XdowsCiRemoveVerdict(
 
 static
 NTSTATUS
-XdowsCiValidateFileObject(
+CiValidateFileObject(
     _In_ PFILE_OBJECT FileObject,
     _Out_ PBOOLEAN Trusted
     )
@@ -572,7 +572,7 @@ XdowsCiValidateFileObject(
 //
 static
 NTSTATUS
-XdowsCiHashFileRange(
+CiHashFileRange(
     _In_ BCRYPT_HASH_HANDLE Hash,
     _In_ HANDLE File,
     _In_ ULONGLONG Start,
@@ -635,7 +635,7 @@ XdowsCiHashFileRange(
 //
 static
 NTSTATUS
-XdowsCiComputeAuthenticodeDigest(
+CiComputeAuthenticodeDigest(
     _In_ HANDLE File,
     _In_ ULONGLONG FileSize,
     _Out_writes_bytes_(XDOWS_CI_DIGEST_BYTES) PUCHAR Digest
@@ -774,18 +774,18 @@ XdowsCiComputeAuthenticodeDigest(
     // stored in Windows catalogs, which made every catalog-signed system image
     // look untrusted even though CiVerifyHashInCatalog was available.
     //
-    status = XdowsCiHashFileRange(hash, File, 0, checksumOffset);
+    status = CiHashFileRange(hash, File, 0, checksumOffset);
     if (!NT_SUCCESS(status)) {
         goto Exit;
     }
 
-    status = XdowsCiHashFileRange(
+    status = CiHashFileRange(
         hash, File, checksumOffset + 4, securityDirectoryOffset);
     if (!NT_SUCCESS(status)) {
         goto Exit;
     }
 
-    status = XdowsCiHashFileRange(
+    status = CiHashFileRange(
         hash,
         File,
         securityDirectoryOffset + 8,
@@ -795,7 +795,7 @@ XdowsCiComputeAuthenticodeDigest(
     }
 
     if (certificateSize != 0) {
-        status = XdowsCiHashFileRange(
+        status = CiHashFileRange(
             hash, File, certificateOffset + certificateSize, FileSize);
     }
     if (!NT_SUCCESS(status)) {
@@ -829,7 +829,7 @@ Exit:
 //
 static
 NTSTATUS
-XdowsCiVerifyProcessCatalog(
+CiVerifyProcessCatalog(
     _In_ PEPROCESS Process,
     _Out_ PBOOLEAN Trusted
     )
@@ -894,7 +894,7 @@ XdowsCiVerifyProcessCatalog(
         return NT_SUCCESS(status) ? STATUS_INVALID_FILE_FOR_SECTION : status;
     }
 
-    status = XdowsCiComputeAuthenticodeDigest(
+    status = CiComputeAuthenticodeDigest(
         file, (ULONGLONG)standardInfo.EndOfFile.QuadPart, digest);
     ZwClose(file);
     if (!NT_SUCCESS(status)) {
@@ -935,7 +935,7 @@ XdowsCiVerifyProcessCatalog(
 //
 static
 VOID
-XdowsCiApplyCatalogFallback(
+CiApplyCatalogFallback(
     _In_opt_ PEPROCESS Process,
     _In_ HANDLE ProcessId,
     _Inout_ PNTSTATUS Status,
@@ -962,7 +962,7 @@ XdowsCiApplyCatalogFallback(
         }
     }
 
-    catalogStatus = XdowsCiVerifyProcessCatalog(process, &catalogTrusted);
+    catalogStatus = CiVerifyProcessCatalog(process, &catalogTrusted);
     if (Process == NULL) {
         ObDereferenceObject(process);
     }
@@ -978,7 +978,7 @@ XdowsCiApplyCatalogFallback(
 
 static
 VOID
-XdowsCiValidateAndCache(
+CiValidateAndCache(
     _In_ PEPROCESS Process
     )
 {
@@ -993,10 +993,10 @@ XdowsCiValidateAndCache(
         return;
     }
 
-    status = XdowsCiValidateFileObject(fileObject, &trusted);
+    status = CiValidateFileObject(fileObject, &trusted);
     ObDereferenceObject(fileObject);
 
-    XdowsCiApplyCatalogFallback(
+    CiApplyCatalogFallback(
         Process,
         PsGetProcessId(Process),
         &status,
@@ -1023,13 +1023,13 @@ XdowsCiValidateAndCache(
                 RTL_NUMBER_OF(message),
                 L"Initial sweep untrusted image (catalog miss): %S",
                 imageName);
-            XdowsLogWrite(
+            LogWrite(
                 XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity", message);
         }
     }
 
     if (NT_SUCCESS(status)) {
-        XdowsCiRecordVerdict(
+        CiRecordVerdict(
             HandleToULong(PsGetProcessId(Process)),
             PsGetProcessCreateTimeQuadPart(Process),
             trusted);
@@ -1045,7 +1045,7 @@ XdowsCiValidateAndCache(
 //
 static
 VOID
-XdowsCiValidateExistingProcesses(
+CiValidateExistingProcesses(
     VOID
     )
 {
@@ -1105,7 +1105,7 @@ XdowsCiValidateExistingProcesses(
             if (NT_SUCCESS(g_CodeIntegrity.LookupProcessById(
                     process->UniqueProcessId,
                     &processObject))) {
-                XdowsCiValidateAndCache(processObject);
+                CiValidateAndCache(processObject);
                 ObDereferenceObject(processObject);
             }
         }
@@ -1136,13 +1136,13 @@ XdowsCiValidateExistingProcesses(
             g_CodeIntegrity.SweepCatalogTrusted,
             g_CodeIntegrity.SweepUntrusted,
             g_CodeIntegrity.SweepErrors);
-        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"CodeIntegrity", message);
+        LogWrite(XdowsSecurityLogInfo, 0, 0, L"CodeIntegrity", message);
     }
 }
 
 static
 VOID
-XdowsCiWorkItemRoutine(
+CiWorkItemRoutine(
     _In_ PDEVICE_OBJECT DeviceObject,
     _In_opt_ PVOID Context
     )
@@ -1155,14 +1155,14 @@ XdowsCiWorkItemRoutine(
         BOOLEAN trusted;
         NTSTATUS status;
 
-        status = XdowsCiValidateFileObject(item->FileObject, &trusted);
+        status = CiValidateFileObject(item->FileObject, &trusted);
 
         //
         // Same catalog fallback as the initial sweep: processes created at
         // runtime must also reach a trusted verdict when they are only
         // catalog-signed (taskhostw.exe, conhost.exe, ...).
         //
-        XdowsCiApplyCatalogFallback(
+        CiApplyCatalogFallback(
             NULL,
             (HANDLE)UlongToHandle(item->ProcessId),
             &status,
@@ -1170,17 +1170,17 @@ XdowsCiWorkItemRoutine(
             NULL);
 
         if (NT_SUCCESS(status)) {
-            XdowsCiRecordVerdict(
+            CiRecordVerdict(
                 item->ProcessId,
                 item->CreateTime,
                 trusted);
         }
         ObDereferenceObject(item->FileObject);
     } else if (item->Process != NULL) {
-        XdowsCiValidateAndCache(item->Process);
+        CiValidateAndCache(item->Process);
         ObDereferenceObject(item->Process);
     } else {
-        XdowsCiValidateExistingProcesses();
+        CiValidateExistingProcesses();
     }
 
     IoFreeWorkItem(item->WorkItem);
@@ -1191,7 +1191,7 @@ XdowsCiWorkItemRoutine(
 
 static
 VOID
-XdowsCiQueueValidation(
+CiQueueValidation(
     _In_opt_ PEPROCESS Process,
     _In_opt_ PFILE_OBJECT FileObject
     )
@@ -1221,7 +1221,7 @@ XdowsCiQueueValidation(
     }
     RtlZeroMemory(item, sizeof(*item));
 
-    deviceObject = WdfDeviceWdmGetDeviceObject(g_XdowsDriverContext.Device);
+    deviceObject = WdfDeviceWdmGetDeviceObject(g_DriverContext.Device);
     item->WorkItem = IoAllocateWorkItem(deviceObject);
     if (item->WorkItem == NULL) {
         ExFreePoolWithTag(item, XDOWS_CI_POOL_TAG);
@@ -1241,14 +1241,14 @@ XdowsCiQueueValidation(
     }
     IoQueueWorkItem(
         item->WorkItem,
-        XdowsCiWorkItemRoutine,
+        CiWorkItemRoutine,
         DelayedWorkQueue,
         item);
 }
 
 static
 VOID
-XdowsCiProcessNotify(
+CiProcessNotify(
     _Inout_ PEPROCESS Process,
     _In_ HANDLE ProcessId,
     _Inout_opt_ PPS_CREATE_NOTIFY_INFO CreateInfo
@@ -1256,17 +1256,17 @@ XdowsCiProcessNotify(
 {
     if (CreateInfo != NULL) {
         if (CreateInfo->FileObject != NULL) {
-            XdowsCiQueueValidation(Process, CreateInfo->FileObject);
+            CiQueueValidation(Process, CreateInfo->FileObject);
         }
     } else {
-        XdowsCiRemoveVerdict(
+        CiRemoveVerdict(
             HandleToULong(ProcessId),
             PsGetProcessCreateTimeQuadPart(Process));
     }
 }
 
 NTSTATUS
-XdowsCodeIntegrityInitialize(
+CodeIntegrityInitialize(
     VOID
     )
 {
@@ -1284,42 +1284,42 @@ XdowsCodeIntegrityInitialize(
     g_CodeIntegrity.Initialized = TRUE;
 
     g_CodeIntegrity.QuerySystemInformation =
-        (XDOWS_ZW_QUERY_SYSTEM_INFORMATION)XdowsCiGetSystemRoutine(
+        (XDOWS_ZW_QUERY_SYSTEM_INFORMATION)CiGetSystemRoutine(
             L"ZwQuerySystemInformation");
     g_CodeIntegrity.LookupProcessById =
-        (XDOWS_PS_LOOKUP_PROCESS_BY_ID)XdowsCiGetSystemRoutine(
+        (XDOWS_PS_LOOKUP_PROCESS_BY_ID)CiGetSystemRoutine(
             L"PsLookupProcessByProcessId");
     g_CodeIntegrity.ReferenceProcessFilePointer =
-        (XDOWS_PS_REFERENCE_PROCESS_FILE_POINTER)XdowsCiGetSystemRoutine(
+        (XDOWS_PS_REFERENCE_PROCESS_FILE_POINTER)CiGetSystemRoutine(
             L"PsReferenceProcessFilePointer");
 
     if (g_CodeIntegrity.QuerySystemInformation == NULL ||
         g_CodeIntegrity.LookupProcessById == NULL ||
         g_CodeIntegrity.ReferenceProcessFilePointer == NULL) {
-        XdowsLogWrite(XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity",
+        LogWrite(XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity",
             L"Required kernel routines unavailable; CI signature cache disabled.");
         return STATUS_SUCCESS;
     }
 
-    status = XdowsCiFindModule(XDOWS_CI_MODULE_NAME, &ciBase, &ciSize);
+    status = CiFindModule(XDOWS_CI_MODULE_NAME, &ciBase, &ciSize);
     if (!NT_SUCCESS(status)) {
-        XdowsLogWriteStatus(XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity",
+        LogWriteStatus(XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity",
             L"ci.dll module base not found; signature cache disabled", status);
         return STATUS_SUCCESS;
     }
 
     g_CodeIntegrity.ValidateFileObject =
-        (XDOWS_CI_VALIDATE_FILE_OBJECT)XdowsCiResolveExport(
+        (XDOWS_CI_VALIDATE_FILE_OBJECT)CiResolveExport(
             ciBase, ciSize, "CiValidateFileObject");
     g_CodeIntegrity.FreePolicyInfo =
-        (XDOWS_CI_FREE_POLICY_INFO)XdowsCiResolveExport(
+        (XDOWS_CI_FREE_POLICY_INFO)CiResolveExport(
             ciBase, ciSize, "CiFreePolicyInfo");
     if (g_CodeIntegrity.ValidateFileObject == NULL ||
         g_CodeIntegrity.FreePolicyInfo == NULL) {
         g_CodeIntegrity.ValidateFileObject = NULL;
         g_CodeIntegrity.FreePolicyInfo = NULL;
         g_CodeIntegrity.VerifyHashInCatalog = NULL;
-        XdowsLogWrite(XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity",
+        LogWrite(XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity",
             L"ci.dll validation exports unavailable; signature cache disabled.");
         return STATUS_SUCCESS;
     }
@@ -1328,31 +1328,31 @@ XdowsCodeIntegrityInitialize(
     // binaries (svchost.exe, services.exe, csrss.exe, ...) whose PE carries
     // only a hash stub. Missing export only disables the fallback.
     g_CodeIntegrity.VerifyHashInCatalog =
-        (XDOWS_CI_VERIFY_HASH_IN_CATALOG)XdowsCiResolveExport(
+        (XDOWS_CI_VERIFY_HASH_IN_CATALOG)CiResolveExport(
             ciBase, ciSize, "CiVerifyHashInCatalog");
 
     (VOID)InterlockedExchange(&g_CodeIntegrity.AcceptingWork, 1);
-    status = PsSetCreateProcessNotifyRoutineEx(XdowsCiProcessNotify, FALSE);
+    status = PsSetCreateProcessNotifyRoutineEx(CiProcessNotify, FALSE);
     if (!NT_SUCCESS(status)) {
         (VOID)InterlockedExchange(&g_CodeIntegrity.AcceptingWork, 0);
         g_CodeIntegrity.ValidateFileObject = NULL;
         g_CodeIntegrity.FreePolicyInfo = NULL;
         g_CodeIntegrity.VerifyHashInCatalog = NULL;
-        XdowsLogWriteStatus(XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity",
+        LogWriteStatus(XdowsSecurityLogWarning, 0, 0, L"CodeIntegrity",
             L"Process notification registration failed; signature cache disabled",
             status);
         return STATUS_SUCCESS;
     }
 
     g_CodeIntegrity.NotifyRegistered = TRUE;
-    XdowsCiQueueValidation(NULL, NULL);
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"CodeIntegrity",
+    CiQueueValidation(NULL, NULL);
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"CodeIntegrity",
         L"Asynchronous ci.dll Authenticode validation active.");
     return STATUS_SUCCESS;
 }
 
 VOID
-XdowsCodeIntegrityShutdown(
+CodeIntegrityShutdown(
     VOID
     )
 {
@@ -1362,7 +1362,7 @@ XdowsCodeIntegrityShutdown(
 
     (VOID)InterlockedExchange(&g_CodeIntegrity.AcceptingWork, 0);
     if (g_CodeIntegrity.NotifyRegistered) {
-        (VOID)PsSetCreateProcessNotifyRoutineEx(XdowsCiProcessNotify, TRUE);
+        (VOID)PsSetCreateProcessNotifyRoutineEx(CiProcessNotify, TRUE);
         g_CodeIntegrity.NotifyRegistered = FALSE;
     }
 
@@ -1373,12 +1373,12 @@ XdowsCodeIntegrityShutdown(
     RtlZeroMemory(g_CodeIntegrity.Verdicts, sizeof(g_CodeIntegrity.Verdicts));
     g_CodeIntegrity.Initialized = FALSE;
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"CodeIntegrity",
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"CodeIntegrity",
         L"Code Integrity signature cache stopped.");
 }
 
 BOOLEAN
-XdowsCodeIntegrityIsAvailable(
+CodeIntegrityIsAvailable(
     VOID
     )
 {
@@ -1389,17 +1389,17 @@ XdowsCodeIntegrityIsAvailable(
 }
 
 BOOLEAN
-XdowsCodeIntegrityQueryProcessTrust(
+CodeIntegrityQueryProcessTrust(
     _In_ PEPROCESS Process,
     _Out_ PBOOLEAN Trusted
     )
 {
     *Trusted = FALSE;
-    if (Process == NULL || !XdowsCodeIntegrityIsAvailable()) {
+    if (Process == NULL || !CodeIntegrityIsAvailable()) {
         return FALSE;
     }
 
-    return XdowsCiLookupVerdict(
+    return CiLookupVerdict(
         HandleToULong(PsGetProcessId(Process)),
         PsGetProcessCreateTimeQuadPart(Process),
         Trusted);

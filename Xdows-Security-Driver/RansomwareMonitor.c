@@ -94,7 +94,7 @@ static const UNICODE_STRING g_DocumentExtensions[] = {
 
 static
 BOOLEAN
-XdowsRansomIsDocumentPath(
+RansomIsDocumentPath(
     _In_opt_ PCUNICODE_STRING Path
     )
 {
@@ -123,7 +123,7 @@ XdowsRansomIsDocumentPath(
 //
 static
 BOOLEAN
-XdowsRansomPathContainsSegment(
+RansomPathContainsSegment(
     _In_ PCUNICODE_STRING Path,
     _In_ PCWSTR Segment
     )
@@ -162,11 +162,11 @@ XdowsRansomPathContainsSegment(
 //
 static
 BOOLEAN
-XdowsRansomIsSystemDirectoryPath(
+RansomIsSystemDirectoryPath(
     _In_opt_ PCUNICODE_STRING Path
     )
 {
-    return XdowsRansomPathContainsSegment(Path, L"Windows");
+    return RansomPathContainsSegment(Path, L"Windows");
 }
 
 //
@@ -179,13 +179,13 @@ XdowsRansomIsSystemDirectoryPath(
 static
 FORCEINLINE
 ULONGLONG
-XdowsRansomTimeToMs(
+RansomTimeToMs(
     _In_ LARGE_INTEGER SystemTime
     );
 
 static
 BOOLEAN
-XdowsRansomRecordInTable(
+RansomRecordInTable(
     _Inout_ XDOWS_RANSOM_SLOT Table[],
     _In_ ULONG OriginatorPid,
     _In_ LARGE_INTEGER Now,
@@ -200,7 +200,7 @@ XdowsRansomRecordInTable(
     ULONGLONG startMs;
     ULONGLONG elapsedMs;
 
-    nowMs = XdowsRansomTimeToMs(Now);
+    nowMs = RansomTimeToMs(Now);
 
     KeAcquireSpinLock(&g_RansomLock, &oldIrql);
 
@@ -235,7 +235,7 @@ XdowsRansomRecordInTable(
         // If already flagged and the window has not expired, keep blocking.
         //
         if (entry->Flagged) {
-            startMs = XdowsRansomTimeToMs(entry->WindowStart);
+            startMs = RansomTimeToMs(entry->WindowStart);
             elapsedMs = (nowMs >= startMs) ? (nowMs - startMs) : 0;
             if (elapsedMs < WindowMs) {
                 flagged = TRUE;
@@ -248,7 +248,7 @@ XdowsRansomRecordInTable(
                 entry->Flagged = FALSE;
             }
         } else {
-            startMs = XdowsRansomTimeToMs(entry->WindowStart);
+            startMs = RansomTimeToMs(entry->WindowStart);
             elapsedMs = (nowMs >= startMs) ? (nowMs - startMs) : 0;
 
             if (elapsedMs >= WindowMs) {
@@ -279,7 +279,7 @@ XdowsRansomRecordInTable(
 static
 FORCEINLINE
 ULONGLONG
-XdowsRansomTimeToMs(
+RansomTimeToMs(
     _In_ LARGE_INTEGER SystemTime
     )
 {
@@ -287,7 +287,7 @@ XdowsRansomTimeToMs(
 }
 
 VOID
-XdowsRansomwareMonitorInitialize(
+RansomwareMonitorInitialize(
     VOID
     )
 {
@@ -297,7 +297,7 @@ XdowsRansomwareMonitorInitialize(
 }
 
 BOOLEAN
-XdowsRansomwareMonitorRecordWrite(
+RansomwareMonitorRecordWrite(
     _In_ ULONG OriginatorPid,
     _In_opt_ PCUNICODE_STRING Path
     )
@@ -313,12 +313,12 @@ XdowsRansomwareMonitorRecordWrite(
     // writes (e.g. .log, .tmp) are ignored to avoid false positives from
     // normal application housekeeping.
     //
-    if (!XdowsRansomIsDocumentPath(Path)) {
+    if (!RansomIsDocumentPath(Path)) {
         return FALSE;
     }
 
     KeQuerySystemTime(&now);
-    return XdowsRansomRecordInTable(
+    return RansomRecordInTable(
         g_RansomSlots,
         OriginatorPid,
         now,
@@ -327,7 +327,7 @@ XdowsRansomwareMonitorRecordWrite(
 }
 
 BOOLEAN
-XdowsRansomwareMonitorRecordSystemDelete(
+RansomwareMonitorRecordSystemDelete(
     _In_ ULONG OriginatorPid,
     _In_opt_ PCUNICODE_STRING Path
     )
@@ -343,12 +343,12 @@ XdowsRansomwareMonitorRecordSystemDelete(
     // target condition is re-checked here so the monitor stays the single
     // owner of the path rule.
     //
-    if (!XdowsRansomIsSystemDirectoryPath(Path)) {
+    if (!RansomIsSystemDirectoryPath(Path)) {
         return FALSE;
     }
 
     KeQuerySystemTime(&now);
-    return XdowsRansomRecordInTable(
+    return RansomRecordInTable(
         g_RansomSysSlots,
         OriginatorPid,
         now,
@@ -357,7 +357,7 @@ XdowsRansomwareMonitorRecordSystemDelete(
 }
 
 VOID
-XdowsRansomwareMonitorResetProcess(
+RansomwareMonitorResetProcess(
     _In_ ULONG OriginatorPid
     )
 {
@@ -388,7 +388,7 @@ XdowsRansomwareMonitorResetProcess(
 }
 
 BOOLEAN
-XdowsRansomwareMonitorIsFlagged(
+RansomwareMonitorIsFlagged(
     _In_ ULONG OriginatorPid
     )
 {
@@ -405,7 +405,7 @@ XdowsRansomwareMonitorIsFlagged(
     }
 
     KeQuerySystemTime(&now);
-    nowMs = XdowsRansomTimeToMs(now);
+    nowMs = RansomTimeToMs(now);
 
     KeAcquireSpinLock(&g_RansomLock, &oldIrql);
 
@@ -416,7 +416,7 @@ XdowsRansomwareMonitorIsFlagged(
             // Verify the window has not expired. If it has, clear the flag
             // so the process can start fresh.
             //
-            startMs = XdowsRansomTimeToMs(g_RansomSlots[slot].WindowStart);
+            startMs = RansomTimeToMs(g_RansomSlots[slot].WindowStart);
             elapsedMs = (nowMs >= startMs) ? (nowMs - startMs) : 0;
 
             if (elapsedMs < XDOWS_RANSOM_WINDOW_MS) {
@@ -433,7 +433,7 @@ XdowsRansomwareMonitorIsFlagged(
         for (slot = 0; slot < XDOWS_RANSOM_MAX_TRACKED_PIDS; slot++) {
             if (g_RansomSysSlots[slot].ProcessId == OriginatorPid &&
                 g_RansomSysSlots[slot].Flagged) {
-                startMs = XdowsRansomTimeToMs(g_RansomSysSlots[slot].WindowStart);
+                startMs = RansomTimeToMs(g_RansomSysSlots[slot].WindowStart);
                 elapsedMs = (nowMs >= startMs) ? (nowMs - startMs) : 0;
 
                 if (elapsedMs < XDOWS_RANSOM_SYS_WINDOW_MS) {

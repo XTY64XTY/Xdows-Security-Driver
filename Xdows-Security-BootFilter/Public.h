@@ -26,9 +26,9 @@
     CTL_CODE(FILE_DEVICE_XDOWS_BOOT, 0x905, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
 
 typedef enum _XDOWS_BOOT_DECISION_TYPE {
-    XdowsBootDecisionUnknown = 0,
-    XdowsBootDecisionAllow = 1,
-    XdowsBootDecisionBlock = 2
+    BootDecisionUnknown = 0,
+    BootDecisionAllow = 1,
+    BootDecisionBlock = 2
 } XDOWS_BOOT_DECISION_TYPE;
 
 typedef struct _XDOWS_BOOT_PROTOCOL_HEADER {

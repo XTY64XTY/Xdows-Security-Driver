@@ -67,7 +67,7 @@ typedef struct _XDOWS_SYSTEM_PROCESS_INFORMATION {
 
 static
 NTSTATUS
-XdowsProcessManagerInvokeControlRoutine(
+ProcessManagerInvokeControlRoutine(
     _In_z_ PCWSTR RoutineName,
     _In_ HANDLE ProcessHandle)
 {
@@ -85,7 +85,7 @@ XdowsProcessManagerInvokeControlRoutine(
 
 static
 NTSTATUS
-XdowsProcessManagerCaptureSnapshot(
+ProcessManagerCaptureSnapshot(
     _Outptr_result_bytebuffer_(*SnapshotLength) PVOID* Snapshot,
     _Out_ PULONG SnapshotLength)
 {
@@ -145,7 +145,7 @@ XdowsProcessManagerCaptureSnapshot(
 
 static
 VOID
-XdowsProcessManagerCopyName(
+ProcessManagerCopyName(
     _In_ PXDOWS_SYSTEM_PROCESS_INFORMATION Process,
     _Out_writes_(XDOWS_SECURITY_MAX_PROCESS_NAME_CHARS) PWCHAR Destination)
 {
@@ -177,7 +177,7 @@ XdowsProcessManagerCopyName(
 }
 
 NTSTATUS
-XdowsProcessManagerQuery(
+ProcessManagerQuery(
     _In_ PXDOWS_SECURITY_PROCESS_QUERY_REQUEST Request,
     _Out_ PXDOWS_SECURITY_PROCESS_QUERY_RESPONSE Response)
 {
@@ -199,7 +199,7 @@ XdowsProcessManagerQuery(
     Response->Header.Size = sizeof(*Response);
     Response->Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
 
-    status = XdowsProcessManagerCaptureSnapshot(&snapshot, &snapshotLength);
+    status = ProcessManagerCaptureSnapshot(&snapshot, &snapshotLength);
     if (!NT_SUCCESS(status)) {
         return status;
     }
@@ -220,7 +220,7 @@ XdowsProcessManagerQuery(
             Response->Entries[count].BasePriority = (ULONG)current->BasePriority;
             Response->Entries[count].WorkingSetBytes = (ULONGLONG)current->WorkingSetSize;
             Response->Entries[count].PrivateBytes = (ULONGLONG)current->PrivatePageCount;
-            XdowsProcessManagerCopyName(current, Response->Entries[count].ImageName);
+            ProcessManagerCopyName(current, Response->Entries[count].ImageName);
             count++;
         }
 
@@ -248,7 +248,7 @@ Exit:
 
 static
 NTSTATUS
-XdowsProcessManagerOpenTarget(
+ProcessManagerOpenTarget(
     _In_ ULONG ProcessId,
     _In_ ACCESS_MASK DesiredAccess,
     _Out_ PHANDLE ProcessHandle)
@@ -264,7 +264,7 @@ XdowsProcessManagerOpenTarget(
 
 static
 NTSTATUS
-XdowsProcessManagerQueryCriticalState(
+ProcessManagerQueryCriticalState(
     _In_ HANDLE ProcessHandle,
     _Out_ PBOOLEAN IsCritical)
 {
@@ -289,7 +289,7 @@ XdowsProcessManagerQueryCriticalState(
 }
 
 NTSTATUS
-XdowsProcessManagerOperate(
+ProcessManagerOperate(
     _In_ ULONG RequestorProcessId,
     _In_ PXDOWS_SECURITY_PROCESS_OPERATION_REQUEST Request)
 {
@@ -304,7 +304,7 @@ XdowsProcessManagerOperate(
         Request->ProcessId == 0 ||
         Request->ProcessId == 4 ||
         Request->ProcessId == RequestorProcessId ||
-        XdowsSelfProtectIsProcessProtected(ULongToHandle(Request->ProcessId))) {
+        SelfProtectIsProcessProtected(ULongToHandle(Request->ProcessId))) {
         return STATUS_ACCESS_DENIED;
     }
 
@@ -322,12 +322,12 @@ XdowsProcessManagerOperate(
         return STATUS_INVALID_PARAMETER;
     }
 
-    status = XdowsProcessManagerOpenTarget(Request->ProcessId, desiredAccess, &processHandle);
+    status = ProcessManagerOpenTarget(Request->ProcessId, desiredAccess, &processHandle);
     if (!NT_SUCCESS(status)) {
         return status;
     }
 
-    status = XdowsProcessManagerQueryCriticalState(processHandle, &isCritical);
+    status = ProcessManagerQueryCriticalState(processHandle, &isCritical);
     if (!NT_SUCCESS(status) || isCritical) {
         status = STATUS_ACCESS_DENIED;
         goto Exit;
@@ -335,12 +335,12 @@ XdowsProcessManagerOperate(
 
     switch ((XDOWS_SECURITY_PROCESS_OPERATION)Request->Operation) {
     case XdowsSecurityProcessOperationSuspend:
-        status = XdowsProcessManagerInvokeControlRoutine(
+        status = ProcessManagerInvokeControlRoutine(
             L"ZwSuspendProcess",
             processHandle);
         break;
     case XdowsSecurityProcessOperationResume:
-        status = XdowsProcessManagerInvokeControlRoutine(
+        status = ProcessManagerInvokeControlRoutine(
             L"ZwResumeProcess",
             processHandle);
         break;

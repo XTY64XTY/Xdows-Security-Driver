@@ -15,12 +15,12 @@ Abstract:
 EXTERN_C_START
 
 NTSTATUS
-XdowsProcessProtectInitialize(
+ProcessProtectInitialize(
     VOID
     );
 
 VOID
-XdowsProcessProtectShutdown(
+ProcessProtectShutdown(
     VOID
     );
 

@@ -41,9 +41,9 @@ Environment:
     (FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data) + \
      (XDOWS_SECURITY_MAX_PATH_CHARS * sizeof(WCHAR)))
 
-static const UNICODE_STRING g_XdowsStartupKeyPath =
+static const UNICODE_STRING g_StartupKeyPath =
     RTL_CONSTANT_STRING(XDOWS_STARTUP_KEY_PATH);
-static const UNICODE_STRING g_XdowsStartupValueName =
+static const UNICODE_STRING g_StartupValueName =
     RTL_CONSTANT_STRING(XDOWS_STARTUP_VALUE_NAME);
 
 NTKERNELAPI
@@ -173,7 +173,7 @@ static XDOWS_GUARD_CONTEXT g_SelfGuard;
 
 static
 NTSTATUS
-XdowsSelfProtectCopyProcessImagePath(
+SelfProtectCopyProcessImagePath(
     _In_ ULONG ProcessId,
     _Out_writes_(PathChars) PWCHAR Path,
     _In_ USHORT PathChars,
@@ -222,7 +222,7 @@ Exit:
 
 static
 NTSTATUS
-XdowsSelfProtectResolveStartupImagePath(
+SelfProtectResolveStartupImagePath(
     _In_ PCUNICODE_STRING DosPath,
     _Out_writes_(PathChars) PWCHAR Path,
     _In_ USHORT PathChars,
@@ -357,7 +357,7 @@ Exit:
 
 static
 BOOLEAN
-XdowsSelfProtectReadStartupValue(
+SelfProtectReadStartupValue(
     _Out_writes_(PathChars) PWCHAR ImagePath,
     _In_ USHORT PathChars,
     _Out_ PUSHORT ImagePathLength
@@ -380,7 +380,7 @@ XdowsSelfProtectReadStartupValue(
     ImagePath[0] = UNICODE_NULL;
     InitializeObjectAttributes(
         &objectAttributes,
-        (PUNICODE_STRING)&g_XdowsStartupKeyPath,
+        (PUNICODE_STRING)&g_StartupKeyPath,
         OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
         NULL,
         NULL);
@@ -392,7 +392,7 @@ XdowsSelfProtectReadStartupValue(
     RtlZeroMemory(queryBuffer, sizeof(queryBuffer));
     status = ZwQueryValueKey(
         keyHandle,
-        (PUNICODE_STRING)&g_XdowsStartupValueName,
+        (PUNICODE_STRING)&g_StartupValueName,
         KeyValuePartialInformation,
         queryBuffer,
         sizeof(queryBuffer),
@@ -404,7 +404,7 @@ XdowsSelfProtectReadStartupValue(
 
     if ((valueInfo->Type != REG_SZ && valueInfo->Type != REG_EXPAND_SZ) ||
         valueInfo->DataLength < sizeof(WCHAR)) {
-        XdowsLogWrite(
+        LogWrite(
             XdowsSecurityLogWarning,
             0,
             0,
@@ -419,7 +419,7 @@ XdowsSelfProtectReadStartupValue(
         dataChars--;
     }
     if (dataChars == 0) {
-        XdowsLogWrite(
+        LogWrite(
             XdowsSecurityLogWarning,
             0,
             0,
@@ -445,7 +445,7 @@ XdowsSelfProtectReadStartupValue(
     }
 
     if (pathChars == 0) {
-        XdowsLogWrite(
+        LogWrite(
             XdowsSecurityLogWarning,
             0,
             0,
@@ -457,7 +457,7 @@ XdowsSelfProtectReadStartupValue(
     dosPath.Buffer = data + pathStart;
     dosPath.Length = pathChars * sizeof(WCHAR);
     dosPath.MaximumLength = dosPath.Length;
-    status = XdowsSelfProtectResolveStartupImagePath(
+    status = SelfProtectResolveStartupImagePath(
         &dosPath,
         ImagePath,
         PathChars,
@@ -465,7 +465,7 @@ XdowsSelfProtectReadStartupValue(
     if (!NT_SUCCESS(status)) {
         *ImagePathLength = 0;
         ImagePath[0] = UNICODE_NULL;
-        XdowsLogWriteStatus(
+        LogWriteStatus(
             XdowsSecurityLogWarning,
             0,
             0,
@@ -479,7 +479,7 @@ XdowsSelfProtectReadStartupValue(
 
 static
 BOOLEAN
-XdowsSelfProtectIsKeyObjectProtected(
+SelfProtectIsKeyObjectProtected(
     _In_ PVOID Object,
     _In_ BOOLEAN IncludeAncestor
     )
@@ -505,17 +505,17 @@ XdowsSelfProtectIsKeyObjectProtected(
 
     if (RtlEqualUnicodeString(
             (PUNICODE_STRING)objectName,
-            (PUNICODE_STRING)&g_XdowsStartupKeyPath,
+            (PUNICODE_STRING)&g_StartupKeyPath,
             TRUE)) {
         protectedKey = TRUE;
     } else if (IncludeAncestor &&
                RtlPrefixUnicodeString(
                    (PUNICODE_STRING)objectName,
-                   (PUNICODE_STRING)&g_XdowsStartupKeyPath,
+                   (PUNICODE_STRING)&g_StartupKeyPath,
                    TRUE)) {
         objectChars = objectName->Length / sizeof(WCHAR);
-        protectedKey = objectName->Length < g_XdowsStartupKeyPath.Length &&
-            g_XdowsStartupKeyPath.Buffer[objectChars] == L'\\';
+        protectedKey = objectName->Length < g_StartupKeyPath.Length &&
+            g_StartupKeyPath.Buffer[objectChars] == L'\\';
     }
 
     CmCallbackReleaseKeyObjectIDEx(objectName);
@@ -524,7 +524,7 @@ XdowsSelfProtectIsKeyObjectProtected(
 
 static
 NTSTATUS
-XdowsSelfProtectRegistryCallback(
+SelfProtectRegistryCallback(
     _In_opt_ PVOID CallbackContext,
     _In_ PVOID Argument1,
     _In_ PVOID Argument2
@@ -558,9 +558,9 @@ XdowsSelfProtectRegistryCallback(
             info->ValueName != NULL &&
             RtlEqualUnicodeString(
                 info->ValueName,
-                (PUNICODE_STRING)&g_XdowsStartupValueName,
+                (PUNICODE_STRING)&g_StartupValueName,
                 TRUE) &&
-            XdowsSelfProtectIsKeyObjectProtected(info->Object, FALSE);
+            SelfProtectIsKeyObjectProtected(info->Object, FALSE);
         break;
     }
     case RegNtPreDeleteValueKey:
@@ -571,9 +571,9 @@ XdowsSelfProtectRegistryCallback(
             info->ValueName != NULL &&
             RtlEqualUnicodeString(
                 info->ValueName,
-                (PUNICODE_STRING)&g_XdowsStartupValueName,
+                (PUNICODE_STRING)&g_StartupValueName,
                 TRUE) &&
-            XdowsSelfProtectIsKeyObjectProtected(info->Object, FALSE);
+            SelfProtectIsKeyObjectProtected(info->Object, FALSE);
         break;
     }
     case RegNtPreDeleteKey:
@@ -581,7 +581,7 @@ XdowsSelfProtectRegistryCallback(
         PREG_DELETE_KEY_INFORMATION info =
             (PREG_DELETE_KEY_INFORMATION)Argument2;
         block = info != NULL &&
-            XdowsSelfProtectIsKeyObjectProtected(info->Object, FALSE);
+            SelfProtectIsKeyObjectProtected(info->Object, FALSE);
         break;
     }
     case RegNtPreRenameKey:
@@ -589,7 +589,7 @@ XdowsSelfProtectRegistryCallback(
         PREG_RENAME_KEY_INFORMATION info =
             (PREG_RENAME_KEY_INFORMATION)Argument2;
         block = info != NULL &&
-            XdowsSelfProtectIsKeyObjectProtected(info->Object, TRUE);
+            SelfProtectIsKeyObjectProtected(info->Object, TRUE);
         break;
     }
     case RegNtPreRestoreKey:
@@ -597,7 +597,7 @@ XdowsSelfProtectRegistryCallback(
         PREG_RESTORE_KEY_INFORMATION info =
             (PREG_RESTORE_KEY_INFORMATION)Argument2;
         block = info != NULL &&
-            XdowsSelfProtectIsKeyObjectProtected(info->Object, TRUE);
+            SelfProtectIsKeyObjectProtected(info->Object, TRUE);
         break;
     }
     case RegNtPreReplaceKey:
@@ -605,7 +605,7 @@ XdowsSelfProtectRegistryCallback(
         PREG_REPLACE_KEY_INFORMATION info =
             (PREG_REPLACE_KEY_INFORMATION)Argument2;
         block = info != NULL &&
-            XdowsSelfProtectIsKeyObjectProtected(info->Object, TRUE);
+            SelfProtectIsKeyObjectProtected(info->Object, TRUE);
         break;
     }
     case RegNtPreUnLoadKey:
@@ -613,7 +613,7 @@ XdowsSelfProtectRegistryCallback(
         PREG_UNLOAD_KEY_INFORMATION info =
             (PREG_UNLOAD_KEY_INFORMATION)Argument2;
         block = info != NULL &&
-            XdowsSelfProtectIsKeyObjectProtected(info->Object, TRUE);
+            SelfProtectIsKeyObjectProtected(info->Object, TRUE);
         break;
     }
     default:
@@ -624,7 +624,7 @@ XdowsSelfProtectRegistryCallback(
         return STATUS_SUCCESS;
     }
 
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogWarning,
         0,
         0,
@@ -635,7 +635,7 @@ XdowsSelfProtectRegistryCallback(
 
 static
 NTSTATUS
-XdowsSelfProtectResolveDirectory(
+SelfProtectResolveDirectory(
     _In_ ULONG ProcessId,
     _Out_writes_(DirectoryChars) PWCHAR Directory,
     _In_ USHORT DirectoryChars,
@@ -703,7 +703,7 @@ Exit:
 //
 static
 VOID
-XdowsSelfProtectSnapshotGuard(
+SelfProtectSnapshotGuard(
     _Out_ PXDOWS_GUARD_SNAPSHOT Snapshot
     )
 {
@@ -724,7 +724,7 @@ XdowsSelfProtectSnapshotGuard(
 //
 static
 BOOLEAN
-XdowsSelfProtectResolveTarget(
+SelfProtectResolveTarget(
     _In_ POB_PRE_OPERATION_INFORMATION Info,
     _Out_ PHANDLE TargetProcessId,
     _Out_ ACCESS_MASK* RestrictedMask
@@ -747,7 +747,7 @@ XdowsSelfProtectResolveTarget(
 
 static
 ACCESS_MASK*
-XdowsSelfProtectLocateDesiredAccess(
+SelfProtectLocateDesiredAccess(
     _In_ POB_PRE_OPERATION_INFORMATION Info
     )
 {
@@ -765,7 +765,7 @@ XdowsSelfProtectLocateDesiredAccess(
 //
 static
 BOOLEAN
-XdowsSelfProtectStripAccess(
+SelfProtectStripAccess(
     _Inout_ ACCESS_MASK* DesiredAccess,
     _In_ ACCESS_MASK RestrictedMask
     )
@@ -778,7 +778,7 @@ XdowsSelfProtectStripAccess(
 
 static
 OB_PREOP_CALLBACK_STATUS
-XdowsSelfProtectPreOperation(
+SelfProtectPreOperation(
     _In_ PVOID RegistrationContext,
     _Inout_ POB_PRE_OPERATION_INFORMATION Info
     )
@@ -791,12 +791,12 @@ XdowsSelfProtectPreOperation(
 
     UNREFERENCED_PARAMETER(RegistrationContext);
 
-    desiredAccess = XdowsSelfProtectLocateDesiredAccess(Info);
+    desiredAccess = SelfProtectLocateDesiredAccess(Info);
     if (desiredAccess == NULL || *desiredAccess == 0) {
         return OB_PREOP_SUCCESS;
     }
 
-    if (!XdowsSelfProtectResolveTarget(Info, &targetProcessId, &restrictedMask)) {
+    if (!SelfProtectResolveTarget(Info, &targetProcessId, &restrictedMask)) {
         return OB_PREOP_SUCCESS;
     }
 
@@ -814,7 +814,7 @@ XdowsSelfProtectPreOperation(
         return OB_PREOP_SUCCESS;
     }
 
-    XdowsSelfProtectSnapshotGuard(&snapshot);
+    SelfProtectSnapshotGuard(&snapshot);
 
     if (!snapshot.Active ||
         snapshot.ExitPermitted ||
@@ -822,8 +822,8 @@ XdowsSelfProtectPreOperation(
         return OB_PREOP_SUCCESS;
     }
 
-    if (XdowsSelfProtectStripAccess(desiredAccess, restrictedMask)) {
-        XdowsLogWrite(
+    if (SelfProtectStripAccess(desiredAccess, restrictedMask)) {
+        LogWrite(
             XdowsSecurityLogWarning,
             0,
             0,
@@ -835,7 +835,7 @@ XdowsSelfProtectPreOperation(
 }
 
 NTSTATUS
-XdowsSelfProtectInitialize(
+SelfProtectInitialize(
     VOID
     )
 {
@@ -862,11 +862,11 @@ XdowsSelfProtectInitialize(
     RtlZeroMemory(operations, sizeof(operations));
     operations[0].ObjectType = PsProcessType;
     operations[0].Operations = OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
-    operations[0].PreOperation = XdowsSelfProtectPreOperation;
+    operations[0].PreOperation = SelfProtectPreOperation;
 
     operations[1].ObjectType = PsThreadType;
     operations[1].Operations = OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
-    operations[1].PreOperation = XdowsSelfProtectPreOperation;
+    operations[1].PreOperation = SelfProtectPreOperation;
 
     RtlInitUnicodeString(&altitude, L"370031.10");
     RtlZeroMemory(&registration, sizeof(registration));
@@ -878,21 +878,21 @@ XdowsSelfProtectInitialize(
     status = ObRegisterCallbacks(&registration, &g_SelfGuard.CallbackHandle);
     if (!NT_SUCCESS(status)) {
         g_SelfGuard.CallbackHandle = NULL;
-        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"SelfProtect",
+        LogWriteStatus(XdowsSecurityLogError, 0, 0, L"SelfProtect",
             L"Object callback registration failed", status);
         return status;
     }
 
-    if (g_XdowsDriverContext.Device == NULL) {
+    if (g_DriverContext.Device == NULL) {
         status = STATUS_INVALID_DEVICE_STATE;
         goto RegistryRegistrationFailed;
     }
 
     driverObject = WdfDriverWdmGetDriverObject(
-        WdfDeviceGetDriver(g_XdowsDriverContext.Device));
+        WdfDeviceGetDriver(g_DriverContext.Device));
     RtlInitUnicodeString(&registryAltitude, XDOWS_STARTUP_REGISTRY_ALTITUDE);
     status = CmRegisterCallbackEx(
-        XdowsSelfProtectRegistryCallback,
+        SelfProtectRegistryCallback,
         &registryAltitude,
         driverObject,
         NULL,
@@ -903,7 +903,7 @@ XdowsSelfProtectInitialize(
     }
     g_SelfGuard.RegistryCallbackRegistered = TRUE;
 
-    startupProtectionEnabled = XdowsSelfProtectReadStartupValue(
+    startupProtectionEnabled = SelfProtectReadStartupValue(
         startupImagePath,
         RTL_NUMBER_OF(startupImagePath),
         &startupImagePathLength);
@@ -919,7 +919,7 @@ XdowsSelfProtectInitialize(
     g_SelfGuard.StartupProtectionInitializing = FALSE;
     ExReleasePushLockExclusive(&g_SelfGuard.Lock);
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
         L"Self-protection callbacks registered.");
     return STATUS_SUCCESS;
 
@@ -929,7 +929,7 @@ RegistryRegistrationFailed:
         ObUnRegisterCallbacks(g_SelfGuard.CallbackHandle);
         g_SelfGuard.CallbackHandle = NULL;
     }
-    XdowsLogWriteStatus(
+    LogWriteStatus(
         XdowsSecurityLogError,
         0,
         0,
@@ -940,7 +940,7 @@ RegistryRegistrationFailed:
 }
 
 VOID
-XdowsSelfProtectShutdown(
+SelfProtectShutdown(
     VOID
     )
 {
@@ -949,7 +949,7 @@ XdowsSelfProtectShutdown(
     if (g_SelfGuard.RegistryCallbackRegistered) {
         (VOID)CmUnRegisterCallback(g_SelfGuard.RegistryCookie);
         g_SelfGuard.RegistryCallbackRegistered = FALSE;
-        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
+        LogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
             L"Startup registry callback unregistered.");
     }
 
@@ -962,15 +962,15 @@ XdowsSelfProtectShutdown(
         // clear the registration state afterward without extra locking.
         //
         ObUnRegisterCallbacks(handle);
-        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
+        LogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
             L"Self-protection callbacks unregistered.");
     }
 
-    XdowsSelfProtectClearRegistration();
+    SelfProtectClearRegistration();
 }
 
 NTSTATUS
-XdowsSelfProtectRegisterProcess(
+SelfProtectRegisterProcess(
     _In_ ULONG ProcessId,
     _In_ ULONG MainThreadId,
     _In_ ULONG Flags
@@ -992,13 +992,13 @@ XdowsSelfProtectRegisterProcess(
         return STATUS_INVALID_PARAMETER;
     }
 
-    status = XdowsSelfProtectResolveDirectory(
+    status = SelfProtectResolveDirectory(
         ProcessId,
         protectedDirectory,
         RTL_NUMBER_OF(protectedDirectory),
         &protectedDirectoryLength);
     if (!NT_SUCCESS(status)) {
-        XdowsLogWriteStatus(
+        LogWriteStatus(
             XdowsSecurityLogError,
             0,
             0,
@@ -1019,13 +1019,13 @@ XdowsSelfProtectRegisterProcess(
     g_SelfGuard.Active = TRUE;
     ExReleasePushLockExclusive(&g_SelfGuard.Lock);
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
         L"Guarded process registered.");
     return STATUS_SUCCESS;
 }
 
 NTSTATUS
-XdowsSelfProtectSetVoluntaryExit(
+SelfProtectSetVoluntaryExit(
     _In_ ULONG ProcessId,
     _In_ BOOLEAN IsVoluntaryExit
     )
@@ -1041,7 +1041,7 @@ XdowsSelfProtectSetVoluntaryExit(
     ExReleasePushLockExclusive(&g_SelfGuard.Lock);
 
     if (NT_SUCCESS(status)) {
-        XdowsLogWrite(
+        LogWrite(
             XdowsSecurityLogInfo,
             0,
             0,
@@ -1053,7 +1053,7 @@ XdowsSelfProtectSetVoluntaryExit(
 }
 
 VOID
-XdowsSelfProtectClearRegistration(
+SelfProtectClearRegistration(
     VOID
     )
 {
@@ -1067,25 +1067,25 @@ XdowsSelfProtectClearRegistration(
         sizeof(g_SelfGuard.ProtectedDirectory));
     ExReleasePushLockExclusive(&g_SelfGuard.Lock);
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"SelfProtect",
         L"Guarded process registration cleared.");
 }
 
 BOOLEAN
-XdowsSelfProtectIsProcessProtected(
+SelfProtectIsProcessProtected(
     _In_ HANDLE ProcessId
     )
 {
     XDOWS_GUARD_SNAPSHOT snapshot;
 
-    XdowsSelfProtectSnapshotGuard(&snapshot);
+    SelfProtectSnapshotGuard(&snapshot);
     return snapshot.Active &&
            !snapshot.ExitPermitted &&
            snapshot.ProcessId == ProcessId;
 }
 
 BOOLEAN
-XdowsSelfProtectIsClientImageAllowed(
+SelfProtectIsClientImageAllowed(
     _In_ PCUNICODE_STRING ImagePath
     )
 {
@@ -1117,7 +1117,7 @@ XdowsSelfProtectIsClientImageAllowed(
 }
 
 NTSTATUS
-XdowsSelfProtectSetStartupProtection(
+SelfProtectSetStartupProtection(
     _In_ ULONG ProcessId,
     _In_ BOOLEAN Enabled
     )
@@ -1126,12 +1126,12 @@ XdowsSelfProtectSetStartupProtection(
     USHORT imagePathLength = 0;
     NTSTATUS status;
 
-    if (!XdowsSelfProtectIsProcessProtected(ULongToHandle(ProcessId))) {
+    if (!SelfProtectIsProcessProtected(ULongToHandle(ProcessId))) {
         return STATUS_ACCESS_DENIED;
     }
 
     if (Enabled) {
-        status = XdowsSelfProtectCopyProcessImagePath(
+        status = SelfProtectCopyProcessImagePath(
             ProcessId,
             imagePath,
             RTL_NUMBER_OF(imagePath),
@@ -1155,7 +1155,7 @@ XdowsSelfProtectSetStartupProtection(
     }
     ExReleasePushLockExclusive(&g_SelfGuard.Lock);
 
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogInfo,
         0,
         0,
@@ -1166,7 +1166,7 @@ XdowsSelfProtectSetStartupProtection(
 }
 
 BOOLEAN
-XdowsSelfProtectIsStartupProtectionEnabled(
+SelfProtectIsStartupProtectionEnabled(
     VOID
     )
 {
@@ -1179,7 +1179,7 @@ XdowsSelfProtectIsStartupProtectionEnabled(
 }
 
 BOOLEAN
-XdowsSelfProtectShouldBlockFileMutation(
+SelfProtectShouldBlockFileMutation(
     _In_ PCUNICODE_STRING Path,
     _In_ HANDLE RequestorProcessId
     )

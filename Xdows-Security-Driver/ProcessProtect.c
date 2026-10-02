@@ -86,7 +86,7 @@ static XDOWS_PROCESS_CONTEXT g_ProcessGuard;
 //
 static
 VOID
-XdowsProcessCopyUnicodeInto(
+ProcessCopyUnicodeInto(
     _Out_writes_(DestinationChars) PWCHAR Destination,
     _In_ SIZE_T DestinationChars,
     _In_opt_ PCUNICODE_STRING Source
@@ -125,7 +125,7 @@ XdowsProcessCopyUnicodeInto(
 //
 static
 BOOLEAN
-XdowsProcessBuildLaunchEvent(
+ProcessBuildLaunchEvent(
     _In_ HANDLE ProcessId,
     _In_ PPS_CREATE_NOTIFY_INFO CreateInfo,
     _Out_ PXDOWS_SECURITY_EVENT Event
@@ -139,7 +139,7 @@ XdowsProcessBuildLaunchEvent(
 
     Event->Header.Size = sizeof(*Event);
     Event->Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
-    Event->EventId = XdowsAllocateEventId();
+    Event->EventId = AllocateEventId();
     Event->CorrelationId = Event->EventId;
     Event->EventType = XdowsSecurityEventProcessCreate;
     Event->Flags = XdowsSecurityEventFlagUserModeRequired;
@@ -153,12 +153,12 @@ XdowsProcessBuildLaunchEvent(
         Event->Flags |= XdowsSecurityEventFlagFileOpenNameAvailable;
     }
 
-    XdowsProcessCopyUnicodeInto(
+    ProcessCopyUnicodeInto(
         Event->ImagePath,
         XDOWS_SECURITY_MAX_PATH_CHARS,
         CreateInfo->ImageFileName);
 
-    XdowsProcessCopyUnicodeInto(
+    ProcessCopyUnicodeInto(
         Event->CommandLine,
         XDOWS_SECURITY_MAX_COMMAND_CHARS,
         CreateInfo->CommandLine);
@@ -179,7 +179,7 @@ XdowsProcessBuildLaunchEvent(
 //
 static
 VOID
-XdowsProcessApplyVerdict(
+ProcessApplyVerdict(
     _In_ PXDOWS_SECURITY_EVENT Event,
     _In_ PXDOWS_SECURITY_DECISION Decision,
     _Inout_ PPS_CREATE_NOTIFY_INFO CreateInfo
@@ -189,7 +189,7 @@ XdowsProcessApplyVerdict(
         return;
     }
 
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogWarning,
         Event->EventId,
         Event->CorrelationId,
@@ -209,7 +209,7 @@ XdowsProcessApplyVerdict(
 //
 static
 BOOLEAN
-XdowsProcessApplyBehaviorPolicy(
+ProcessApplyBehaviorPolicy(
     _Inout_ PXDOWS_SECURITY_EVENT Event,
     _Inout_ PPS_CREATE_NOTIFY_INFO CreateInfo
     )
@@ -226,7 +226,7 @@ XdowsProcessApplyBehaviorPolicy(
     ULONG matchedRuleFlags = 0;
     ULONG matchedBehaviorType = 0;
 
-    if (!XdowsBehaviorProtectIsEnabled()) {
+    if (!BehaviorProtectIsEnabled()) {
         return FALSE;
     }
 
@@ -236,7 +236,7 @@ XdowsProcessApplyBehaviorPolicy(
         XDOWS_SECURITY_MAX_COMMAND_CHARS * sizeof(WCHAR));
     commandLine.Length = (USHORT)(wcslen(Event->CommandLine) * sizeof(WCHAR));
 
-    behavior = XdowsBehaviorInspectCommandLine(&commandLine);
+    behavior = BehaviorInspectCommandLine(&commandLine);
     if (behavior == XdowsSecurityBehaviorNone) {
         //
         // Parent-process-chain rule: a document viewer / browser / mail
@@ -249,7 +249,7 @@ XdowsProcessApplyBehaviorPolicy(
             XDOWS_SECURITY_MAX_PATH_CHARS * sizeof(WCHAR));
         childImage.Length = (USHORT)(wcslen(Event->ImagePath) * sizeof(WCHAR));
 
-        behavior = XdowsBehaviorInspectParentChain(
+        behavior = BehaviorInspectParentChain(
             Event->ParentProcessId,
             &childImage);
     }
@@ -284,13 +284,13 @@ XdowsProcessApplyBehaviorPolicy(
             actorImageName = PsGetProcessImageFileName(actorProcess);
         }
 
-        actorExcluded = XdowsBehaviorIsInitiatorExcluded(
+        actorExcluded = BehaviorIsInitiatorExcluded(
             XDOWS_SECURITY_EXCLUSION_SCOPE_PROCESS,
             &actorPath,
             actorImageName);
 
         if (!actorExcluded &&
-            XdowsBehaviorEvaluateCustomRules(
+            BehaviorEvaluateCustomRules(
                 &actorPath,
                 actorImageName,
                 &commandLine,
@@ -344,8 +344,8 @@ XdowsProcessApplyBehaviorPolicy(
                 RTL_NUMBER_OF(ruleMessage),
                 L"Declarative rule %lu matched at launch: %s",
                 matchedRuleId,
-                XdowsBehaviorTypeName(behavior)))) {
-            XdowsLogWrite(
+                BehaviorTypeName(behavior)))) {
+            LogWrite(
                 XdowsSecurityLogWarning,
                 Event->EventId,
                 Event->CorrelationId,
@@ -353,21 +353,21 @@ XdowsProcessApplyBehaviorPolicy(
                 ruleMessage);
         }
     } else {
-        XdowsLogWrite(
+        LogWrite(
             XdowsSecurityLogWarning,
             Event->EventId,
             Event->CorrelationId,
             L"Behavior",
-            XdowsBehaviorTypeName(behavior));
+            BehaviorTypeName(behavior));
     }
 
-    status = XdowsQueueEventAndWait(Event, &decision);
+    status = QueueEventAndWait(Event, &decision);
     infrastructureFailure = !NT_SUCCESS(status) ||
         decision.Decision == XdowsSecurityDecisionTimeout;
 
     if (infrastructureFailure) {
         if (failOpenOnInfrastructureFailure) {
-            XdowsLogWriteStatus(
+            LogWriteStatus(
                 XdowsSecurityLogWarning,
                 Event->EventId,
                 Event->CorrelationId,
@@ -376,7 +376,7 @@ XdowsProcessApplyBehaviorPolicy(
                 status);
         } else {
             CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
-            XdowsLogWriteStatus(
+            LogWriteStatus(
                 XdowsSecurityLogWarning,
                 Event->EventId,
                 Event->CorrelationId,
@@ -389,14 +389,14 @@ XdowsProcessApplyBehaviorPolicy(
 
     if (decision.Decision == XdowsSecurityDecisionBlock) {
         CreateInfo->CreationStatus = STATUS_VIRUS_INFECTED;
-        XdowsLogWrite(
+        LogWrite(
             XdowsSecurityLogWarning,
             Event->EventId,
             Event->CorrelationId,
             L"Behavior",
             L"Confirmed behavior blocked by user decision.");
     } else {
-        XdowsLogWrite(
+        LogWrite(
             XdowsSecurityLogInfo,
             Event->EventId,
             Event->CorrelationId,
@@ -409,7 +409,7 @@ XdowsProcessApplyBehaviorPolicy(
 
 static
 VOID
-XdowsProcessNotifyRoutine(
+ProcessNotifyRoutine(
     _Inout_ PEPROCESS Process,
     _In_ HANDLE ProcessId,
     _Inout_opt_ PPS_CREATE_NOTIFY_INFO CreateInfo
@@ -428,30 +428,30 @@ XdowsProcessNotifyRoutine(
     // document-writing processes the monitor would stop tracking new PIDs.
     //
     if (CreateInfo == NULL) {
-        XdowsRansomwareMonitorResetProcess(HandleToULong(ProcessId));
-        if (XdowsIsRegisteredClientProcess(HandleToULong(ProcessId))) {
-            XdowsSelfProtectClearRegistration();
-            XdowsDisconnectClient();
+        RansomwareMonitorResetProcess(HandleToULong(ProcessId));
+        if (IsRegisteredClientProcess(HandleToULong(ProcessId))) {
+            SelfProtectClearRegistration();
+            DisconnectClient();
         }
         return;
     }
 
-    if (!XdowsProcessBuildLaunchEvent(ProcessId, CreateInfo, &event)) {
+    if (!ProcessBuildLaunchEvent(ProcessId, CreateInfo, &event)) {
         return;
     }
 
-    if (XdowsProcessApplyBehaviorPolicy(&event, CreateInfo)) {
+    if (ProcessApplyBehaviorPolicy(&event, CreateInfo)) {
         return;
     }
 
-    status = XdowsQueueEventAndWait(&event, &decision);
+    status = QueueEventAndWait(&event, &decision);
     if (!NT_SUCCESS(status)) {
         //
         // Bridge failure: per spec R02, allow the launch so the system stays
         // usable. Record the condition locally so it surfaces in the driver
         // log even if the bridge could not accept the event.
         //
-        XdowsLogWriteStatus(
+        LogWriteStatus(
             XdowsSecurityLogWarning,
             event.EventId,
             event.CorrelationId,
@@ -461,11 +461,11 @@ XdowsProcessNotifyRoutine(
         return;
     }
 
-    XdowsProcessApplyVerdict(&event, &decision, CreateInfo);
+    ProcessApplyVerdict(&event, &decision, CreateInfo);
 }
 
 NTSTATUS
-XdowsProcessProtectInitialize(
+ProcessProtectInitialize(
     VOID
     )
 {
@@ -475,25 +475,25 @@ XdowsProcessProtectInitialize(
         return STATUS_SUCCESS;
     }
 
-    status = PsSetCreateProcessNotifyRoutineEx(XdowsProcessNotifyRoutine, FALSE);
+    status = PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutine, FALSE);
     if (!NT_SUCCESS(status)) {
         g_ProcessGuard.ProtectionActive = FALSE;
-        g_XdowsDriverContext.ProcessProtectionEnabled = FALSE;
-        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"Process",
+        g_DriverContext.ProcessProtectionEnabled = FALSE;
+        LogWriteStatus(XdowsSecurityLogError, 0, 0, L"Process",
             L"Process-notify registration failed", status);
         return status;
     }
 
     g_ProcessGuard.CallbackRegistered = TRUE;
     g_ProcessGuard.ProtectionActive = TRUE;
-    g_XdowsDriverContext.ProcessProtectionEnabled = TRUE;
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Process",
+    g_DriverContext.ProcessProtectionEnabled = TRUE;
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"Process",
         L"Process-launch interception active.");
     return STATUS_SUCCESS;
 }
 
 VOID
-XdowsProcessProtectShutdown(
+ProcessProtectShutdown(
     VOID
     )
 {
@@ -501,10 +501,10 @@ XdowsProcessProtectShutdown(
         return;
     }
 
-    PsSetCreateProcessNotifyRoutineEx(XdowsProcessNotifyRoutine, TRUE);
+    PsSetCreateProcessNotifyRoutineEx(ProcessNotifyRoutine, TRUE);
     g_ProcessGuard.CallbackRegistered = FALSE;
     g_ProcessGuard.ProtectionActive = FALSE;
-    g_XdowsDriverContext.ProcessProtectionEnabled = FALSE;
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Process",
+    g_DriverContext.ProcessProtectionEnabled = FALSE;
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"Process",
         L"Process-launch interception stopped.");
 }

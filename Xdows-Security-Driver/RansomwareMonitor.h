@@ -53,7 +53,7 @@ EXTERN_C_START
 // Initialize the monitor. Must be called exactly once at driver start.
 //
 VOID
-XdowsRansomwareMonitorInitialize(
+RansomwareMonitorInitialize(
     VOID
     );
 
@@ -70,7 +70,7 @@ XdowsRansomwareMonitorInitialize(
 // extension check and is not retained.
 //
 BOOLEAN
-XdowsRansomwareMonitorRecordWrite(
+RansomwareMonitorRecordWrite(
     _In_ ULONG OriginatorPid,
     _In_opt_ PCUNICODE_STRING Path
     );
@@ -81,7 +81,7 @@ XdowsRansomwareMonitorRecordWrite(
 // opens from an already-flagged process before the write happens.
 //
 BOOLEAN
-XdowsRansomwareMonitorIsFlagged(
+RansomwareMonitorIsFlagged(
     _In_ ULONG OriginatorPid
     );
 
@@ -94,7 +94,7 @@ XdowsRansomwareMonitorIsFlagged(
 // recording when the target is elsewhere.
 //
 BOOLEAN
-XdowsRansomwareMonitorRecordSystemDelete(
+RansomwareMonitorRecordSystemDelete(
     _In_ ULONG OriginatorPid,
     _In_opt_ PCUNICODE_STRING Path
     );
@@ -104,7 +104,7 @@ XdowsRansomwareMonitorRecordSystemDelete(
 // both the user-data and the system-directory slot tables.
 //
 VOID
-XdowsRansomwareMonitorResetProcess(
+RansomwareMonitorResetProcess(
     _In_ ULONG OriginatorPid
     );
 

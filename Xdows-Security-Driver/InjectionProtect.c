@@ -109,7 +109,7 @@ PsGetProcessImageFileName(
 // gate below.
 //
 #define XDOWS_INJECTION_CRITICAL_PROCESS_COUNT 6u
-static const PCSTR XdowsInjectionCriticalProcesses[XDOWS_INJECTION_CRITICAL_PROCESS_COUNT] = {
+static const PCSTR InjectionCriticalProcesses[XDOWS_INJECTION_CRITICAL_PROCESS_COUNT] = {
     "lsass.exe",
     "csrss.exe",
     "winlogon.exe",
@@ -217,7 +217,7 @@ typedef const XDOWS_INJECTION_TARGET *PCXDOWS_INJECTION_TARGET;
 
 static
 ACCESS_MASK*
-XdowsInjectionDesiredAccessField(
+InjectionDesiredAccessField(
     _In_ POB_PRE_OPERATION_INFORMATION Info
     )
 {
@@ -237,7 +237,7 @@ XdowsInjectionDesiredAccessField(
 //
 static
 BOOLEAN
-XdowsInjectionResolveTarget(
+InjectionResolveTarget(
     _In_ POB_PRE_OPERATION_INFORMATION Info,
     _Out_ PXDOWS_INJECTION_TARGET Target
     )
@@ -276,7 +276,7 @@ XdowsInjectionResolveTarget(
 //
 static
 ACCESS_MASK
-XdowsInjectionComputeThreatMask(
+InjectionComputeThreatMask(
     _In_ PCXDOWS_INJECTION_TARGET Target,
     _In_ ACCESS_MASK RequestedMask
     )
@@ -301,7 +301,7 @@ XdowsInjectionComputeThreatMask(
 //
 static
 BOOLEAN
-XdowsInjectionLookupVerdict(
+InjectionLookupVerdict(
     _In_ ULONG SourceProcessId,
     _In_ ULONG TargetProcessId,
     _In_ ULONGLONG TargetCreateTime,
@@ -346,7 +346,7 @@ XdowsInjectionLookupVerdict(
 //
 static
 VOID
-XdowsInjectionRecordVerdict(
+InjectionRecordVerdict(
     _In_ ULONG SourceProcessId,
     _In_ ULONG TargetProcessId,
     _In_ ULONGLONG TargetCreateTime,
@@ -411,7 +411,7 @@ XdowsInjectionRecordVerdict(
 //
 static
 VOID
-XdowsInjectionCopyActorImagePath(
+InjectionCopyActorImagePath(
     _Out_writes_(PathChars) PWCHAR Path,
     _In_ ULONG PathChars
     )
@@ -451,7 +451,7 @@ XdowsInjectionCopyActorImagePath(
 //
 static
 BOOLEAN
-XdowsInjectionConsultUser(
+InjectionConsultUser(
     _In_ PCXDOWS_INJECTION_TARGET Target,
     _In_ ACCESS_MASK DesiredAccess,
     _In_ ULONG SourceProcessId,
@@ -472,9 +472,9 @@ XdowsInjectionConsultUser(
     RtlZeroMemory(&event, sizeof(event));
     event.Header.Size = sizeof(event);
     event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
-    event.EventId = XdowsAllocateEventId();
+    event.EventId = AllocateEventId();
     event.CorrelationId = event.EventId;
-    if (XdowsBehaviorProtectIsEnabled() ||
+    if (BehaviorProtectIsEnabled() ||
         BehaviorTypeOverride != XdowsSecurityBehaviorNone) {
         event.EventType = XdowsSecurityEventBehavior;
         event.BehaviorType = (BehaviorTypeOverride != XdowsSecurityBehaviorNone)
@@ -500,7 +500,7 @@ XdowsInjectionConsultUser(
         L"desired-access=0x%08X",
         DesiredAccess);
 
-    XdowsInjectionCopyActorImagePath(
+    InjectionCopyActorImagePath(
         event.ActorImagePath,
         RTL_NUMBER_OF(event.ActorImagePath));
 
@@ -511,7 +511,7 @@ XdowsInjectionConsultUser(
         *CorrelationId = event.CorrelationId;
     }
 
-    status = XdowsQueueEventAndWait(&event, &decision);
+    status = QueueEventAndWait(&event, &decision);
     if (!NT_SUCCESS(status) ||
         decision.Decision == XdowsSecurityDecisionTimeout) {
         //
@@ -525,7 +525,7 @@ XdowsInjectionConsultUser(
         // NOTE: STATUS_TIMEOUT (0x00000102) is NT_SUCCESS, so the first
         // check alone does not catch it; the Decision==Timeout check does.
         //
-        XdowsLogWriteStatus(
+        LogWriteStatus(
             XdowsSecurityLogWarning,
             event.EventId,
             event.CorrelationId,
@@ -560,7 +560,7 @@ XdowsInjectionConsultUser(
 
 static
 BOOLEAN
-XdowsInjectionImageNameEquals(
+InjectionImageNameEquals(
     _In_ PCSTR ImageName,
     _In_ PCSTR KnownName
     )
@@ -604,7 +604,7 @@ XdowsInjectionImageNameEquals(
 //
 static
 BOOLEAN
-XdowsInjectionIsKnownSystemActor(
+InjectionIsKnownSystemActor(
     VOID
     )
 {
@@ -642,7 +642,7 @@ XdowsInjectionIsKnownSystemActor(
     }
 
     for (i = 0; i < RTL_NUMBER_OF(knownActors); i++) {
-        if (XdowsInjectionImageNameEquals(imageName, knownActors[i])) {
+        if (InjectionImageNameEquals(imageName, knownActors[i])) {
             return TRUE;
         }
     }
@@ -658,7 +658,7 @@ static volatile LONGLONG s_LastSystemActorAllowLog = 0;
 
 static
 VOID
-XdowsInjectionLogSystemActorAllow(
+InjectionLogSystemActorAllow(
     VOID
     )
 {
@@ -679,7 +679,7 @@ XdowsInjectionLogSystemActorAllow(
         return;
     }
 
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogInfo,
         0,
         0,
@@ -690,11 +690,11 @@ XdowsInjectionLogSystemActorAllow(
 //
 // True when the target process image is one of the critical system processes
 // that must never be injected into or torn open. Uses the EPROCESS cached
-// name; the list mirrors XdowsInjectionCriticalProcesses above.
+// name; the list mirrors InjectionCriticalProcesses above.
 //
 static
 BOOLEAN
-XdowsInjectionIsCriticalTarget(
+InjectionIsCriticalTarget(
     _In_ PEPROCESS TargetProcess
     )
 {
@@ -711,9 +711,9 @@ XdowsInjectionIsCriticalTarget(
     }
 
     for (i = 0; i < XDOWS_INJECTION_CRITICAL_PROCESS_COUNT; i++) {
-        if (XdowsInjectionImageNameEquals(
+        if (InjectionImageNameEquals(
                 imageName,
-                XdowsInjectionCriticalProcesses[i])) {
+                InjectionCriticalProcesses[i])) {
             return TRUE;
         }
     }
@@ -733,7 +733,7 @@ XdowsInjectionIsCriticalTarget(
 // confirmed Block on a critical persistence key to the same counter-kill.
 //
 NTSTATUS
-XdowsInjectionKillActor(
+InjectionKillActor(
     _In_ ULONG ActorProcessId
     )
 {
@@ -745,8 +745,8 @@ XdowsInjectionKillActor(
 
     if (ActorProcessId == 0 ||
         ActorProcessId <= 4 ||
-        ActorProcessId == HandleToULong(g_XdowsDriverContext.ClientProcessId) ||
-        XdowsSelfProtectIsProcessProtected(ULongToHandle(ActorProcessId))) {
+        ActorProcessId == HandleToULong(g_DriverContext.ClientProcessId) ||
+        SelfProtectIsProcessProtected(ULongToHandle(ActorProcessId))) {
         return STATUS_ACCESS_DENIED;
     }
 
@@ -755,7 +755,7 @@ XdowsInjectionKillActor(
         return status;
     }
 
-    if (XdowsInjectionIsCriticalTarget(actorProcess)) {
+    if (InjectionIsCriticalTarget(actorProcess)) {
         ObDereferenceObject(actorProcess);
         return STATUS_ACCESS_DENIED;
     }
@@ -787,7 +787,7 @@ XdowsInjectionKillActor(
 
 static
 OB_PREOP_CALLBACK_STATUS
-XdowsInjectionPreOperation(
+InjectionPreOperation(
     _In_ PVOID RegistrationContext,
     _Inout_ POB_PRE_OPERATION_INFORMATION Info
     )
@@ -806,18 +806,18 @@ XdowsInjectionPreOperation(
 
     UNREFERENCED_PARAMETER(RegistrationContext);
 
-    desiredAccess = XdowsInjectionDesiredAccessField(Info);
+    desiredAccess = InjectionDesiredAccessField(Info);
     if (desiredAccess == NULL || *desiredAccess == 0) {
         return OB_PREOP_SUCCESS;
     }
 
     requestedMask = *desiredAccess;
 
-    if (!XdowsInjectionResolveTarget(Info, &target)) {
+    if (!InjectionResolveTarget(Info, &target)) {
         return OB_PREOP_SUCCESS;
     }
 
-    threatMask = XdowsInjectionComputeThreatMask(&target, requestedMask);
+    threatMask = InjectionComputeThreatMask(&target, requestedMask);
     effectiveDangerous = requestedMask & threatMask;
 
     //
@@ -832,7 +832,7 @@ XdowsInjectionPreOperation(
     callerProcessId = PsGetCurrentProcessId();
     if (target.TargetProcessId == NULL ||
         target.TargetProcessId == callerProcessId ||
-        callerProcessId == g_XdowsDriverContext.ClientProcessId ||
+        callerProcessId == g_DriverContext.ClientProcessId ||
         effectiveDangerous == 0) {
         return OB_PREOP_SUCCESS;
     }
@@ -850,12 +850,12 @@ XdowsInjectionPreOperation(
     //
     if (target.EventType == XdowsSecurityEventProcessHandle &&
         (requestedMask & PROCESS_TERMINATE) &&
-        XdowsSelfProtectIsProcessProtected(target.TargetProcessId)) {
+        SelfProtectIsProcessProtected(target.TargetProcessId)) {
         XDOWS_SECURITY_DECISION decision;
         BOOLEAN allowed;
 
         RtlZeroMemory(&decision, sizeof(decision));
-        allowed = XdowsInjectionConsultUser(
+        allowed = InjectionConsultUser(
             &target,
             PROCESS_TERMINATE,
             sourcePid,
@@ -871,7 +871,7 @@ XdowsInjectionPreOperation(
         //
         if (!allowed || decision.Decision != XdowsSecurityDecisionAllow) {
             *desiredAccess &= ~PROCESS_TERMINATE;
-            XdowsLogWrite(
+            LogWrite(
                 XdowsSecurityLogWarning,
                 eventId,
                 correlationId,
@@ -879,8 +879,8 @@ XdowsInjectionPreOperation(
                 L"Protected process terminate request denied; rights stripped.");
 
             if (decision.ResultCode == XDOWS_DECISION_RESULT_KILL_ACTOR) {
-                NTSTATUS killStatus = XdowsInjectionKillActor(sourcePid);
-                XdowsLogWriteStatus(
+                NTSTATUS killStatus = InjectionKillActor(sourcePid);
+                LogWriteStatus(
                     XdowsSecurityLogWarning,
                     eventId,
                     correlationId,
@@ -898,7 +898,7 @@ XdowsInjectionPreOperation(
     // verdict suppresses the noisy user-mode path; unknown and unsigned
     // sources continue through the existing policy unchanged.
     //
-    signatureKnown = XdowsCodeIntegrityQueryProcessTrust(
+    signatureKnown = CodeIntegrityQueryProcessTrust(
         PsGetCurrentProcess(),
         &sourceTrusted);
     if (signatureKnown && sourceTrusted) {
@@ -913,8 +913,8 @@ XdowsInjectionPreOperation(
     // driver load, when most startup handle traffic happens). This trades a
     // small amount of detection coverage for startup responsiveness.
     //
-    if (XdowsInjectionIsKnownSystemActor()) {
-        XdowsInjectionLogSystemActorAllow();
+    if (InjectionIsKnownSystemActor()) {
+        InjectionLogSystemActorAllow();
         return OB_PREOP_SUCCESS;
     }
 
@@ -926,14 +926,14 @@ XdowsInjectionPreOperation(
     // the actor.
     //
     if (target.EventType == XdowsSecurityEventProcessHandle &&
-        XdowsInjectionIsCriticalTarget(
+        InjectionIsCriticalTarget(
             (PEPROCESS)Info->Object) &&
         effectiveDangerous != 0) {
         XDOWS_SECURITY_DECISION decision;
         BOOLEAN allowed;
 
         RtlZeroMemory(&decision, sizeof(decision));
-        allowed = XdowsInjectionConsultUser(
+        allowed = InjectionConsultUser(
             &target,
             effectiveDangerous,
             sourcePid,
@@ -944,7 +944,7 @@ XdowsInjectionPreOperation(
 
         if (!allowed || decision.Decision != XdowsSecurityDecisionAllow) {
             *desiredAccess &= ~threatMask;
-            XdowsLogWrite(
+            LogWrite(
                 XdowsSecurityLogWarning,
                 eventId,
                 correlationId,
@@ -952,8 +952,8 @@ XdowsInjectionPreOperation(
                 L"Sensitive system-process handle rights stripped.");
 
             if (decision.ResultCode == XDOWS_DECISION_RESULT_KILL_ACTOR) {
-                NTSTATUS killStatus = XdowsInjectionKillActor(sourcePid);
-                XdowsLogWriteStatus(
+                NTSTATUS killStatus = InjectionKillActor(sourcePid);
+                LogWriteStatus(
                     XdowsSecurityLogWarning,
                     eventId,
                     correlationId,
@@ -973,7 +973,7 @@ XdowsInjectionPreOperation(
     // suppress the rights-stripping applied to a critical system target -- it
     // only removes the generic consultation noise.
     //
-    if (XdowsBehaviorIsInitiatorExcluded(
+    if (BehaviorIsInitiatorExcluded(
             XDOWS_SECURITY_EXCLUSION_SCOPE_HANDLE,
             NULL,
             PsGetProcessImageFileName(PsGetCurrentProcess()))) {
@@ -983,7 +983,7 @@ XdowsInjectionPreOperation(
     //
     // Cache hit: skip user-mode consultation for repeated allow requests.
     //
-    if (XdowsInjectionLookupVerdict(
+    if (InjectionLookupVerdict(
             sourcePid,
             HandleToULong(target.TargetProcessId),
             target.TargetCreateTime,
@@ -991,7 +991,7 @@ XdowsInjectionPreOperation(
         return OB_PREOP_SUCCESS;
     }
 
-    if (XdowsInjectionConsultUser(
+    if (InjectionConsultUser(
             &target,
             effectiveDangerous,
             sourcePid,
@@ -999,7 +999,7 @@ XdowsInjectionPreOperation(
             NULL,
             &eventId,
             &correlationId)) {
-        XdowsInjectionRecordVerdict(
+        InjectionRecordVerdict(
             sourcePid,
             HandleToULong(target.TargetProcessId),
             target.TargetCreateTime,
@@ -1008,7 +1008,7 @@ XdowsInjectionPreOperation(
     }
 
     *desiredAccess &= ~threatMask;
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogWarning,
         eventId,
         correlationId,
@@ -1018,7 +1018,7 @@ XdowsInjectionPreOperation(
 }
 
 NTSTATUS
-XdowsInjectionProtectInitialize(
+InjectionProtectInitialize(
     VOID
     )
 {
@@ -1038,16 +1038,16 @@ XdowsInjectionProtectInitialize(
     // intentionally returns success when private exports are unavailable so
     // process/thread injection protection remains active on unsupported OS
     // builds and falls back to the established user-mode policy.
-    (VOID)XdowsCodeIntegrityInitialize();
+    (VOID)CodeIntegrityInitialize();
 
     RtlZeroMemory(operations, sizeof(operations));
     operations[0].ObjectType = PsProcessType;
     operations[0].Operations = OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
-    operations[0].PreOperation = XdowsInjectionPreOperation;
+    operations[0].PreOperation = InjectionPreOperation;
 
     operations[1].ObjectType = PsThreadType;
     operations[1].Operations = OB_OPERATION_HANDLE_CREATE | OB_OPERATION_HANDLE_DUPLICATE;
-    operations[1].PreOperation = XdowsInjectionPreOperation;
+    operations[1].PreOperation = InjectionPreOperation;
 
     RtlInitUnicodeString(&altitude, L"370031.20");
     RtlZeroMemory(&registration, sizeof(registration));
@@ -1059,19 +1059,19 @@ XdowsInjectionProtectInitialize(
     status = ObRegisterCallbacks(&registration, &g_Injection.CallbackHandle);
     if (!NT_SUCCESS(status)) {
         g_Injection.CallbackHandle = NULL;
-        XdowsCodeIntegrityShutdown();
-        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"Injection",
+        CodeIntegrityShutdown();
+        LogWriteStatus(XdowsSecurityLogError, 0, 0, L"Injection",
             L"Object callback registration failed", status);
         return status;
     }
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Injection",
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"Injection",
         L"Injection protection callbacks registered.");
     return STATUS_SUCCESS;
 }
 
 VOID
-XdowsInjectionProtectShutdown(
+InjectionProtectShutdown(
     VOID
     )
 {
@@ -1089,8 +1089,8 @@ XdowsInjectionProtectShutdown(
     }
 
     RtlZeroMemory(g_Injection.Verdicts, sizeof(g_Injection.Verdicts));
-    XdowsCodeIntegrityShutdown();
+    CodeIntegrityShutdown();
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Injection",
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"Injection",
         L"Injection protection callbacks unregistered.");
 }

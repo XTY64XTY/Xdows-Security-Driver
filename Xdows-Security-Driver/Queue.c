@@ -93,7 +93,7 @@ Return Value:
 
 static
 ULONG
-XdowsGetRequestorProcessId(
+GetRequestorProcessId(
     _In_ WDFREQUEST Request
     )
 {
@@ -113,26 +113,26 @@ XdowsGetRequestorProcessId(
 
 static
 NTSTATUS
-XdowsRequireRegisteredClient(
+RequireRegisteredClient(
     _In_ WDFREQUEST Request,
     _Out_opt_ PULONG RequestorProcessId
     )
 {
     ULONG processId;
 
-    processId = XdowsGetRequestorProcessId(Request);
+    processId = GetRequestorProcessId(Request);
     if (RequestorProcessId != NULL) {
         *RequestorProcessId = processId;
     }
 
-    return XdowsIsRegisteredClientProcess(processId)
+    return IsRegisteredClientProcess(processId)
         ? STATUS_SUCCESS
         : STATUS_ACCESS_DENIED;
 }
 
 static
 NTSTATUS
-XdowsRequireProtectedClient(
+RequireProtectedClient(
     _In_ WDFREQUEST Request,
     _Out_opt_ PULONG RequestorProcessId
     )
@@ -140,7 +140,7 @@ XdowsRequireProtectedClient(
     ULONG processId;
     NTSTATUS status;
 
-    status = XdowsRequireRegisteredClient(Request, &processId);
+    status = RequireRegisteredClient(Request, &processId);
     if (RequestorProcessId != NULL) {
         *RequestorProcessId = processId;
     }
@@ -148,7 +148,7 @@ XdowsRequireProtectedClient(
         return status;
     }
 
-    return XdowsSelfProtectIsProcessProtected(ULongToHandle(processId))
+    return SelfProtectIsProcessProtected(ULongToHandle(processId))
         ? STATUS_SUCCESS
         : STATUS_ACCESS_DENIED;
 }
@@ -213,17 +213,17 @@ Return Value:
             break;
         }
 
-        requestorProcessId = XdowsGetRequestorProcessId(Request);
+        requestorProcessId = GetRequestorProcessId(Request);
         if (requestorProcessId == 0 ||
             input->ClientProcessId != requestorProcessId) {
             status = STATUS_ACCESS_DENIED;
             break;
         }
 
-        status = XdowsRegisterClient(input, requestorProcessId, output);
+        status = RegisterClient(input, requestorProcessId, output);
         if (NT_SUCCESS(status)) {
             XdowsSecurityDriverRevokeUnload();
-            XdowsFileProtectRevokeUnload();
+            FileProtectRevokeUnload();
             information = sizeof(*output);
         }
         break;
@@ -232,7 +232,7 @@ Return Value:
     {
         PXDOWS_SECURITY_HEARTBEAT_REQUEST input;
 
-        status = XdowsRequireRegisteredClient(Request, NULL);
+        status = RequireRegisteredClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -242,7 +242,7 @@ Return Value:
             break;
         }
 
-        status = XdowsHeartbeat(input);
+        status = Heartbeat(input);
         break;
     }
     case IOCTL_XDOWS_SECURITY_GET_NEXT_EVENT:
@@ -251,7 +251,7 @@ Return Value:
 
         UNREFERENCED_PARAMETER(InputBufferLength);
 
-        status = XdowsRequireRegisteredClient(Request, NULL);
+        status = RequireRegisteredClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -261,7 +261,7 @@ Return Value:
             break;
         }
 
-        status = XdowsGetNextPendingEvent(output);
+        status = GetNextPendingEvent(output);
         if (NT_SUCCESS(status)) {
             information = sizeof(*output);
         }
@@ -273,7 +273,7 @@ Return Value:
 
         UNREFERENCED_PARAMETER(InputBufferLength);
 
-        status = XdowsRequireRegisteredClient(Request, NULL);
+        status = RequireRegisteredClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -287,7 +287,7 @@ Return Value:
             break;
         }
 
-        status = XdowsGetNextPendingEventsBatch(output, (ULONG)OutputBufferLength);
+        status = GetNextPendingEventsBatch(output, (ULONG)OutputBufferLength);
         if (NT_SUCCESS(status)) {
             information = sizeof(XDOWS_SECURITY_PROTOCOL_HEADER) +
                 output->Count * sizeof(XDOWS_SECURITY_EVENT);
@@ -298,7 +298,7 @@ Return Value:
     {
         PXDOWS_SECURITY_DECISION input;
 
-        status = XdowsRequireRegisteredClient(Request, NULL);
+        status = RequireRegisteredClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -308,7 +308,7 @@ Return Value:
             break;
         }
 
-        status = XdowsSubmitDecision(input);
+        status = SubmitDecision(input);
         break;
     }
     case IOCTL_XDOWS_SECURITY_GET_STATE:
@@ -330,7 +330,7 @@ Return Value:
             break;
         }
 
-        XdowsGetState(output);
+        GetState(output);
         status = STATUS_SUCCESS;
         information = sizeof(*output);
         break;
@@ -339,7 +339,7 @@ Return Value:
     {
         PXDOWS_SECURITY_LOG_ENTRY output;
 
-        status = XdowsRequireRegisteredClient(Request, NULL);
+        status = RequireRegisteredClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -349,7 +349,7 @@ Return Value:
             break;
         }
 
-        status = XdowsLogGetNext(output);
+        status = LogGetNext(output);
         if (NT_SUCCESS(status)) {
             information = sizeof(*output);
         }
@@ -359,15 +359,15 @@ Return Value:
     {
         ULONG requestorProcessId;
 
-        status = XdowsRequireRegisteredClient(Request, &requestorProcessId);
+        status = RequireRegisteredClient(Request, &requestorProcessId);
         if (!NT_SUCCESS(status)) {
             break;
         }
-        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client disconnected.");
-        if (XdowsSelfProtectIsProcessProtected(ULongToHandle(requestorProcessId))) {
-            XdowsSelfProtectClearRegistration();
+        LogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client disconnected.");
+        if (SelfProtectIsProcessProtected(ULongToHandle(requestorProcessId))) {
+            SelfProtectClearRegistration();
         }
-        XdowsDisconnectClient();
+        DisconnectClient();
         status = STATUS_SUCCESS;
         break;
     }
@@ -376,7 +376,7 @@ Return Value:
         PXDOWS_SECURITY_PROTECTED_PROCESS_REQUEST input;
         ULONG requestorProcessId;
 
-        status = XdowsRequireRegisteredClient(Request, &requestorProcessId);
+        status = RequireRegisteredClient(Request, &requestorProcessId);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -396,7 +396,7 @@ Return Value:
             break;
         }
 
-        status = XdowsSelfProtectRegisterProcess(input->ProcessId, input->MainThreadId, input->Flags);
+        status = SelfProtectRegisterProcess(input->ProcessId, input->MainThreadId, input->Flags);
         break;
     }
     case IOCTL_XDOWS_SECURITY_SET_VOLUNTARY_EXIT:
@@ -404,7 +404,7 @@ Return Value:
         PXDOWS_SECURITY_VOLUNTARY_EXIT_REQUEST input;
         ULONG requestorProcessId;
 
-        status = XdowsRequireRegisteredClient(Request, &requestorProcessId);
+        status = RequireRegisteredClient(Request, &requestorProcessId);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -424,14 +424,14 @@ Return Value:
             break;
         }
 
-        status = XdowsSelfProtectSetVoluntaryExit(input->ProcessId, input->IsVoluntaryExit != 0);
+        status = SelfProtectSetVoluntaryExit(input->ProcessId, input->IsVoluntaryExit != 0);
         break;
     }
     case IOCTL_XDOWS_SECURITY_AUTHORIZED_SHUTDOWN:
     {
         PXDOWS_SECURITY_SHUTDOWN_REQUEST input;
 
-        status = XdowsRequireProtectedClient(Request, NULL);
+        status = RequireProtectedClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -447,14 +447,14 @@ Return Value:
             break;
         }
 
-        if (!XdowsTokenAuthValidate(input->ShutdownToken)) {
-            XdowsLogWrite(XdowsSecurityLogWarning, 0, 0, L"TokenAuth", L"Authorized shutdown denied.");
+        if (!TokenAuthValidate(input->ShutdownToken)) {
+            LogWrite(XdowsSecurityLogWarning, 0, 0, L"TokenAuth", L"Authorized shutdown denied.");
             status = STATUS_ACCESS_DENIED;
             break;
         }
 
         if (!XdowsSecurityDriverAuthorizeUnload()) {
-            XdowsLogWrite(
+            LogWrite(
                 XdowsSecurityLogError,
                 0,
                 0,
@@ -464,11 +464,11 @@ Return Value:
             break;
         }
 
-        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Authorized shutdown accepted.");
-        XdowsFileProtectAuthorizeUnload();
-        XdowsSelfProtectClearRegistration();
-        XdowsTokenAuthInvalidate();
-        XdowsDisconnectClient();
+        LogWrite(XdowsSecurityLogInfo, 0, 0, L"TokenAuth", L"Authorized shutdown accepted.");
+        FileProtectAuthorizeUnload();
+        SelfProtectClearRegistration();
+        TokenAuthInvalidate();
+        DisconnectClient();
         status = STATUS_SUCCESS;
         break;
     }
@@ -477,7 +477,7 @@ Return Value:
         PXDOWS_SECURITY_STARTUP_PROTECTION_REQUEST input;
         ULONG requestorProcessId;
 
-        status = XdowsRequireProtectedClient(Request, &requestorProcessId);
+        status = RequireProtectedClient(Request, &requestorProcessId);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -501,7 +501,7 @@ Return Value:
             break;
         }
 
-        status = XdowsSelfProtectSetStartupProtection(
+        status = SelfProtectSetStartupProtection(
             input->ProcessId,
             input->Enabled != 0);
         break;
@@ -510,7 +510,7 @@ Return Value:
     {
         PXDOWS_SECURITY_BOOT_PROTECTION_REQUEST input;
 
-        status = XdowsRequireProtectedClient(Request, NULL);
+        status = RequireProtectedClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -529,14 +529,14 @@ Return Value:
             break;
         }
 
-        status = XdowsFileProtectConfigureBootProtection(input);
+        status = FileProtectConfigureBootProtection(input);
         break;
     }
     case IOCTL_XDOWS_SECURITY_SET_REGISTRY_PROTECTION:
     {
         PXDOWS_SECURITY_REGISTRY_PROTECTION_REQUEST input;
 
-        status = XdowsRequireProtectedClient(Request, NULL);
+        status = RequireProtectedClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -555,14 +555,14 @@ Return Value:
             break;
         }
 
-        status = XdowsRegistryProtectConfigure(input);
+        status = RegistryProtectConfigure(input);
         break;
     }
     case IOCTL_XDOWS_SECURITY_SET_BEHAVIOR_RULES:
     {
         PXDOWS_SECURITY_BEHAVIOR_RULE_REQUEST input;
 
-        status = XdowsRequireProtectedClient(Request, NULL);
+        status = RequireProtectedClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -581,14 +581,14 @@ Return Value:
             break;
         }
 
-        status = XdowsBehaviorConfigureRules(input);
+        status = BehaviorConfigureRules(input);
         break;
     }
     case IOCTL_XDOWS_SECURITY_SET_INITIATOR_EXCLUSIONS:
     {
         PXDOWS_SECURITY_INITIATOR_EXCLUSION_REQUEST input;
 
-        status = XdowsRequireProtectedClient(Request, NULL);
+        status = RequireProtectedClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -607,7 +607,7 @@ Return Value:
             break;
         }
 
-        status = XdowsBehaviorConfigureInitiatorExclusions(input);
+        status = BehaviorConfigureInitiatorExclusions(input);
         break;
     }
     case IOCTL_XDOWS_SECURITY_QUERY_PROCESSES:
@@ -616,7 +616,7 @@ Return Value:
         XDOWS_SECURITY_PROCESS_QUERY_REQUEST requestCopy;
         PXDOWS_SECURITY_PROCESS_QUERY_RESPONSE output;
 
-        status = XdowsRequireProtectedClient(Request, NULL);
+        status = RequireProtectedClient(Request, NULL);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -627,7 +627,7 @@ Return Value:
         }
         if (input->Header.Size != sizeof(*input) ||
             input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION ||
-            !XdowsTokenAuthValidate(input->AuthorizationToken)) {
+            !TokenAuthValidate(input->AuthorizationToken)) {
             status = STATUS_ACCESS_DENIED;
             break;
         }
@@ -639,7 +639,7 @@ Return Value:
             break;
         }
 
-        status = XdowsProcessManagerQuery(&requestCopy, output);
+        status = ProcessManagerQuery(&requestCopy, output);
         RtlSecureZeroMemory(requestCopy.AuthorizationToken, sizeof(requestCopy.AuthorizationToken));
         if (NT_SUCCESS(status)) {
             information = sizeof(*output);
@@ -651,7 +651,7 @@ Return Value:
         PXDOWS_SECURITY_PROCESS_OPERATION_REQUEST input;
         ULONG requestorProcessId;
 
-        status = XdowsRequireProtectedClient(Request, &requestorProcessId);
+        status = RequireProtectedClient(Request, &requestorProcessId);
         if (!NT_SUCCESS(status)) {
             break;
         }
@@ -662,20 +662,20 @@ Return Value:
         }
         if (input->Header.Size != sizeof(*input) ||
             input->Header.Version != XDOWS_SECURITY_PROTOCOL_VERSION ||
-            !XdowsTokenAuthValidate(input->AuthorizationToken)) {
-            XdowsLogWrite(XdowsSecurityLogWarning, 0, 0, L"ProcessManager",
+            !TokenAuthValidate(input->AuthorizationToken)) {
+            LogWrite(XdowsSecurityLogWarning, 0, 0, L"ProcessManager",
                 L"Process operation authorization denied.");
             status = STATUS_ACCESS_DENIED;
             break;
         }
 
-        status = XdowsProcessManagerOperate(requestorProcessId, input);
+        status = ProcessManagerOperate(requestorProcessId, input);
         RtlSecureZeroMemory(input->AuthorizationToken, sizeof(input->AuthorizationToken));
         if (NT_SUCCESS(status)) {
-            XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"ProcessManager",
+            LogWrite(XdowsSecurityLogInfo, 0, 0, L"ProcessManager",
                 L"Authorized process operation completed.");
         } else {
-            XdowsLogWriteStatus(XdowsSecurityLogWarning, 0, 0, L"ProcessManager",
+            LogWriteStatus(XdowsSecurityLogWarning, 0, 0, L"ProcessManager",
                 L"Authorized process operation failed", status);
         }
         break;

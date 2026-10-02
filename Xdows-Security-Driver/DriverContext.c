@@ -31,7 +31,7 @@ SeLocateProcessImageName(
     _Outptr_ PUNICODE_STRING* pImageFileName
     );
 
-static const UNICODE_STRING g_XdowsClientImageName =
+static const UNICODE_STRING g_ClientImageName =
     RTL_CONSTANT_STRING(L"Xdows-Security.exe");
 
 //
@@ -46,7 +46,7 @@ static const UNICODE_STRING g_XdowsClientImageName =
 //
 #define XDOWS_THROTTLE_WINDOW_100NS (10 * 1000 * 1000)
 
-static const ULONG XdowsThrottleLimitPerType[XDOWS_SECURITY_EVENT_TYPE_COUNT] = {
+static const ULONG ThrottleLimitPerType[XDOWS_SECURITY_EVENT_TYPE_COUNT] = {
     0,     /* XdowsSecurityEventNone          */
     0,     /* XdowsSecurityEventProcessCreate critical */
     200,   /* XdowsSecurityEventFileCreate    noise */
@@ -63,7 +63,7 @@ static const ULONG XdowsThrottleLimitPerType[XDOWS_SECURITY_EVENT_TYPE_COUNT] = 
 
 static
 NTSTATUS
-XdowsValidateClientProcess(
+ValidateClientProcess(
     _In_ ULONG ProcessId
     )
 {
@@ -100,8 +100,8 @@ XdowsValidateClientProcess(
     imageName.Buffer = imagePath->Buffer + nameStart;
     imageName.Length = imagePath->Length - (nameStart * sizeof(WCHAR));
     imageName.MaximumLength = imageName.Length;
-    if (!RtlEqualUnicodeString(&imageName, &g_XdowsClientImageName, TRUE) ||
-        !XdowsSelfProtectIsClientImageAllowed(imagePath)) {
+    if (!RtlEqualUnicodeString(&imageName, &g_ClientImageName, TRUE) ||
+        !SelfProtectIsClientImageAllowed(imagePath)) {
         status = STATUS_ACCESS_DENIED;
     } else {
         status = STATUS_SUCCESS;
@@ -113,7 +113,7 @@ XdowsValidateClientProcess(
 
 static
 BOOLEAN
-XdowsIsCriticalEventType(
+IsCriticalEventType(
     _In_ ULONG EventType
     )
 {
@@ -133,11 +133,11 @@ XdowsIsCriticalEventType(
         EventType == XdowsSecurityEventFileRename;
 }
 
-XDOWS_DRIVER_CONTEXT g_XdowsDriverContext;
+XDOWS_DRIVER_CONTEXT g_DriverContext;
 
 static
 VOID
-XdowsInitializeHeader(
+InitializeHeader(
     _Out_ PXDOWS_SECURITY_PROTOCOL_HEADER Header,
     _In_ ULONG Size
     )
@@ -148,7 +148,7 @@ XdowsInitializeHeader(
 
 static
 BOOLEAN
-XdowsIsHeaderValid(
+IsHeaderValid(
     _In_ PXDOWS_SECURITY_PROTOCOL_HEADER Header,
     _In_ ULONG ExpectedSize
     )
@@ -158,49 +158,49 @@ XdowsIsHeaderValid(
 }
 
 NTSTATUS
-XdowsInitializeGlobalContext(
+InitializeGlobalContext(
     _In_ WDFDEVICE Device
     )
 {
-    RtlZeroMemory(&g_XdowsDriverContext, sizeof(g_XdowsDriverContext));
-    g_XdowsDriverContext.Device = Device;
-    KeInitializeSpinLock(&g_XdowsDriverContext.Lock);
-    KeInitializeEvent(&g_XdowsDriverContext.PendingAvailableEvent, SynchronizationEvent, FALSE);
-    InitializeListHead(&g_XdowsDriverContext.PendingEvents);
-    g_XdowsDriverContext.NextEventId = 1;
-    g_XdowsDriverContext.Initialized = TRUE;
+    RtlZeroMemory(&g_DriverContext, sizeof(g_DriverContext));
+    g_DriverContext.Device = Device;
+    KeInitializeSpinLock(&g_DriverContext.Lock);
+    KeInitializeEvent(&g_DriverContext.PendingAvailableEvent, SynchronizationEvent, FALSE);
+    InitializeListHead(&g_DriverContext.PendingEvents);
+    g_DriverContext.NextEventId = 1;
+    g_DriverContext.Initialized = TRUE;
     return STATUS_SUCCESS;
 }
 
 VOID
-XdowsShutdownGlobalContext(
+ShutdownGlobalContext(
     VOID
     )
 {
     KIRQL oldIrql;
     LIST_ENTRY localList;
 
-    if (!g_XdowsDriverContext.Initialized) {
+    if (!g_DriverContext.Initialized) {
         return;
     }
 
     InitializeListHead(&localList);
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
-    g_XdowsDriverContext.ClientConnected = FALSE;
-    g_XdowsDriverContext.AsyncReviewEnabled = FALSE;
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
+    g_DriverContext.ClientConnected = FALSE;
+    g_DriverContext.AsyncReviewEnabled = FALSE;
 
-    while (!IsListEmpty(&g_XdowsDriverContext.PendingEvents)) {
-        PLIST_ENTRY entry = RemoveHeadList(&g_XdowsDriverContext.PendingEvents);
+    while (!IsListEmpty(&g_DriverContext.PendingEvents)) {
+        PLIST_ENTRY entry = RemoveHeadList(&g_DriverContext.PendingEvents);
         PXDOWS_PENDING_EVENT pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
         pending->Linked = FALSE;
         InsertTailList(&localList, entry);
     }
 
-    g_XdowsDriverContext.PendingEventCount = 0;
-    g_XdowsDriverContext.Initialized = FALSE;
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
-    KeSetEvent(&g_XdowsDriverContext.PendingAvailableEvent, IO_NO_INCREMENT, FALSE);
+    g_DriverContext.PendingEventCount = 0;
+    g_DriverContext.Initialized = FALSE;
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
+    KeSetEvent(&g_DriverContext.PendingAvailableEvent, IO_NO_INCREMENT, FALSE);
 
     while (!IsListEmpty(&localList)) {
         PLIST_ENTRY entry = RemoveHeadList(&localList);
@@ -220,25 +220,25 @@ XdowsShutdownGlobalContext(
 }
 
 ULONGLONG
-XdowsAllocateEventId(
+AllocateEventId(
     VOID
     )
 {
     KIRQL oldIrql;
     ULONGLONG eventId;
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
-    eventId = g_XdowsDriverContext.NextEventId++;
-    if (g_XdowsDriverContext.NextEventId == 0) {
-        g_XdowsDriverContext.NextEventId = 1;
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
+    eventId = g_DriverContext.NextEventId++;
+    if (g_DriverContext.NextEventId == 0) {
+        g_DriverContext.NextEventId = 1;
     }
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
 
     return eventId;
 }
 
 NTSTATUS
-XdowsRegisterClient(
+RegisterClient(
     _In_ PXDOWS_SECURITY_REGISTER_REQUEST Request,
     _In_ ULONG RequestorProcessId,
     _Out_ PXDOWS_SECURITY_REGISTER_RESPONSE Response
@@ -247,7 +247,7 @@ XdowsRegisterClient(
     KIRQL oldIrql;
     NTSTATUS tokenStatus;
 
-    if (!XdowsIsHeaderValid(&Request->Header, sizeof(*Request))) {
+    if (!IsHeaderValid(&Request->Header, sizeof(*Request))) {
         return STATUS_REVISION_MISMATCH;
     }
     if (RequestorProcessId == 0 ||
@@ -255,8 +255,8 @@ XdowsRegisterClient(
         return STATUS_ACCESS_DENIED;
     }
 
-    if (!NT_SUCCESS(XdowsValidateClientProcess(RequestorProcessId))) {
-        XdowsLogWrite(
+    if (!NT_SUCCESS(ValidateClientProcess(RequestorProcessId))) {
+        LogWrite(
             XdowsSecurityLogWarning,
             0,
             0,
@@ -265,48 +265,48 @@ XdowsRegisterClient(
         return STATUS_ACCESS_DENIED;
     }
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
-    if (g_XdowsDriverContext.ClientConnected &&
-        g_XdowsDriverContext.ClientProcessId != ULongToHandle(RequestorProcessId)) {
-        KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
+    if (g_DriverContext.ClientConnected &&
+        g_DriverContext.ClientProcessId != ULongToHandle(RequestorProcessId)) {
+        KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
         return STATUS_DEVICE_BUSY;
     }
-    g_XdowsDriverContext.ClientConnected = TRUE;
-    g_XdowsDriverContext.ClientProcessId = ULongToHandle(RequestorProcessId);
-    g_XdowsDriverContext.AsyncReviewEnabled =
+    g_DriverContext.ClientConnected = TRUE;
+    g_DriverContext.ClientProcessId = ULongToHandle(RequestorProcessId);
+    g_DriverContext.AsyncReviewEnabled =
         (Request->Flags & XDOWS_SECURITY_REGISTER_FLAG_ASYNC_REVIEW) != 0;
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
 
     RtlZeroMemory(Response, sizeof(*Response));
-    XdowsInitializeHeader(&Response->Header, sizeof(*Response));
+    InitializeHeader(&Response->Header, sizeof(*Response));
     Response->Status = STATUS_SUCCESS;
     Response->ProtocolVersion = XDOWS_SECURITY_PROTOCOL_VERSION;
     Response->DefaultKernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
     Response->Capabilities = XDOWS_SECURITY_CAPABILITIES;
     Response->DriverBuildId = XDOWS_SECURITY_DRIVER_BUILD_ID;
-    tokenStatus = XdowsTokenAuthCopyOneTimeToken(
+    tokenStatus = TokenAuthCopyOneTimeToken(
         Response->ShutdownToken,
         RTL_NUMBER_OF(Response->ShutdownToken));
     if (tokenStatus == STATUS_NOT_FOUND) {
-        tokenStatus = XdowsTokenAuthRotate();
+        tokenStatus = TokenAuthRotate();
         if (NT_SUCCESS(tokenStatus)) {
-            tokenStatus = XdowsTokenAuthCopyOneTimeToken(
+            tokenStatus = TokenAuthCopyOneTimeToken(
                 Response->ShutdownToken,
                 RTL_NUMBER_OF(Response->ShutdownToken));
         }
     }
     if (!NT_SUCCESS(tokenStatus)) {
         Response->Status = tokenStatus;
-        XdowsDisconnectClient();
+        DisconnectClient();
         return tokenStatus;
     }
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client registered.");
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client registered.");
     return STATUS_SUCCESS;
 }
 
 BOOLEAN
-XdowsIsRegisteredClientProcess(
+IsRegisteredClientProcess(
     _In_ ULONG ProcessId
     )
 {
@@ -317,16 +317,16 @@ XdowsIsRegisteredClientProcess(
         return FALSE;
     }
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
-    registered = g_XdowsDriverContext.Initialized &&
-        g_XdowsDriverContext.ClientConnected &&
-        g_XdowsDriverContext.ClientProcessId == ULongToHandle(ProcessId);
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
+    registered = g_DriverContext.Initialized &&
+        g_DriverContext.ClientConnected &&
+        g_DriverContext.ClientProcessId == ULongToHandle(ProcessId);
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
     return registered;
 }
 
 VOID
-XdowsDisconnectClient(
+DisconnectClient(
     VOID
     )
 {
@@ -335,20 +335,20 @@ XdowsDisconnectClient(
 
     InitializeListHead(&localList);
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
-    g_XdowsDriverContext.ClientConnected = FALSE;
-    g_XdowsDriverContext.ClientProcessId = NULL;
-    g_XdowsDriverContext.AsyncReviewEnabled = FALSE;
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
+    g_DriverContext.ClientConnected = FALSE;
+    g_DriverContext.ClientProcessId = NULL;
+    g_DriverContext.AsyncReviewEnabled = FALSE;
 
-    while (!IsListEmpty(&g_XdowsDriverContext.PendingEvents)) {
-        PLIST_ENTRY entry = RemoveHeadList(&g_XdowsDriverContext.PendingEvents);
+    while (!IsListEmpty(&g_DriverContext.PendingEvents)) {
+        PLIST_ENTRY entry = RemoveHeadList(&g_DriverContext.PendingEvents);
         PXDOWS_PENDING_EVENT pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
         pending->Linked = FALSE;
         InsertTailList(&localList, entry);
     }
-    g_XdowsDriverContext.PendingEventCount = 0;
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
-    KeSetEvent(&g_XdowsDriverContext.PendingAvailableEvent, IO_NO_INCREMENT, FALSE);
+    g_DriverContext.PendingEventCount = 0;
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
+    KeSetEvent(&g_DriverContext.PendingAvailableEvent, IO_NO_INCREMENT, FALSE);
 
     while (!IsListEmpty(&localList)) {
         PLIST_ENTRY entry = RemoveHeadList(&localList);
@@ -373,31 +373,31 @@ XdowsDisconnectClient(
         KeSetEvent(&pending->DecisionEvent, IO_NO_INCREMENT, FALSE);
     }
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client state cleared.");
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"Bridge", L"Client state cleared.");
 }
 
 NTSTATUS
-XdowsHeartbeat(
+Heartbeat(
     _In_ PXDOWS_SECURITY_HEARTBEAT_REQUEST Request
     )
 {
     KIRQL oldIrql;
     BOOLEAN connected;
 
-    if (!XdowsIsHeaderValid(&Request->Header, sizeof(*Request))) {
+    if (!IsHeaderValid(&Request->Header, sizeof(*Request))) {
         return STATUS_REVISION_MISMATCH;
     }
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
-    connected = g_XdowsDriverContext.ClientConnected &&
-        g_XdowsDriverContext.ClientProcessId == ULongToHandle(Request->ClientProcessId);
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
+    connected = g_DriverContext.ClientConnected &&
+        g_DriverContext.ClientProcessId == ULongToHandle(Request->ClientProcessId);
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
 
     return connected ? STATUS_SUCCESS : STATUS_DEVICE_NOT_CONNECTED;
 }
 
 NTSTATUS
-XdowsGetNextPendingEvent(
+GetNextPendingEvent(
     _Out_ PXDOWS_SECURITY_EVENT Event
     )
 {
@@ -407,10 +407,10 @@ XdowsGetNextPendingEvent(
     NTSTATUS waitStatus;
 
     for (;;) {
-        KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
+        KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
 
-        for (entry = g_XdowsDriverContext.PendingEvents.Flink;
-             entry != &g_XdowsDriverContext.PendingEvents;
+        for (entry = g_DriverContext.PendingEvents.Flink;
+             entry != &g_DriverContext.PendingEvents;
              entry = entry->Flink) {
             PXDOWS_PENDING_EVENT pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
             if (!pending->Delivered) {
@@ -423,22 +423,22 @@ XdowsGetNextPendingEvent(
                     //
                     RemoveEntryList(&pending->Link);
                     pending->Linked = FALSE;
-                    if (g_XdowsDriverContext.PendingEventCount > 0) {
-                        g_XdowsDriverContext.PendingEventCount--;
+                    if (g_DriverContext.PendingEventCount > 0) {
+                        g_DriverContext.PendingEventCount--;
                     }
-                    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+                    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
                     ExFreePoolWithTag(pending, 'swDX');
                 } else {
-                    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+                    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
                 }
                 return STATUS_SUCCESS;
             }
         }
 
-        KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+        KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
         timeout.QuadPart = -(LONGLONG)1000 * 10000LL;
         waitStatus = KeWaitForSingleObject(
-            &g_XdowsDriverContext.PendingAvailableEvent,
+            &g_DriverContext.PendingAvailableEvent,
             Executive,
             KernelMode,
             FALSE,
@@ -450,7 +450,7 @@ XdowsGetNextPendingEvent(
 }
 
 NTSTATUS
-XdowsGetNextPendingEventsBatch(
+GetNextPendingEventsBatch(
     _Out_ PXDOWS_SECURITY_EVENT_BATCH Batch,
     _In_ ULONG OutputBufferLength
     )
@@ -497,13 +497,13 @@ Routine Description:
     RtlZeroMemory(&Batch->Header, sizeof(Batch->Header));
     Batch->Count = 0;
     Batch->Reserved = 0;
-    XdowsInitializeHeader(&Batch->Header, sizeof(*Batch));
+    InitializeHeader(&Batch->Header, sizeof(*Batch));
     InitializeListHead(&freeList);
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
 
-    entry = g_XdowsDriverContext.PendingEvents.Flink;
-    while (entry != &g_XdowsDriverContext.PendingEvents && count < capacity) {
+    entry = g_DriverContext.PendingEvents.Flink;
+    while (entry != &g_DriverContext.PendingEvents && count < capacity) {
         next = entry->Flink;
         pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
         if (!pending->Delivered) {
@@ -521,13 +521,13 @@ Routine Description:
     }
 
     if (removed > 0) {
-        if (g_XdowsDriverContext.PendingEventCount >= removed) {
-            g_XdowsDriverContext.PendingEventCount -= removed;
+        if (g_DriverContext.PendingEventCount >= removed) {
+            g_DriverContext.PendingEventCount -= removed;
         } else {
-            g_XdowsDriverContext.PendingEventCount = 0;
+            g_DriverContext.PendingEventCount = 0;
         }
     }
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
 
     while (!IsListEmpty(&freeList)) {
         entry = RemoveHeadList(&freeList);
@@ -540,50 +540,50 @@ Routine Description:
 }
 
 NTSTATUS
-XdowsSubmitDecision(
+SubmitDecision(
     _In_ PXDOWS_SECURITY_DECISION Decision
     )
 {
     KIRQL oldIrql;
     PLIST_ENTRY entry;
 
-    if (!XdowsIsHeaderValid(&Decision->Header, sizeof(*Decision))) {
+    if (!IsHeaderValid(&Decision->Header, sizeof(*Decision))) {
         return STATUS_REVISION_MISMATCH;
     }
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
 
-    for (entry = g_XdowsDriverContext.PendingEvents.Flink;
-         entry != &g_XdowsDriverContext.PendingEvents;
+    for (entry = g_DriverContext.PendingEvents.Flink;
+         entry != &g_DriverContext.PendingEvents;
          entry = entry->Flink) {
         PXDOWS_PENDING_EVENT pending = CONTAINING_RECORD(entry, XDOWS_PENDING_EVENT, Link);
         if (pending->Event.EventId == Decision->EventId) {
             if (Decision->Decision == XdowsSecurityDecisionPending) {
                 if (pending->UserDecisionPending || pending->FinalDecisionSubmitted) {
-                    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+                    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
                     return STATUS_INVALID_DEVICE_STATE;
                 }
                 pending->UserDecisionPending = TRUE;
             } else {
                 if (pending->FinalDecisionSubmitted) {
-                    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+                    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
                     return STATUS_INVALID_DEVICE_STATE;
                 }
                 pending->FinalDecisionSubmitted = TRUE;
             }
             RtlCopyMemory(&pending->Decision, Decision, sizeof(*Decision));
             KeSetEvent(&pending->DecisionEvent, IO_NO_INCREMENT, FALSE);
-            KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+            KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
             return STATUS_SUCCESS;
         }
     }
 
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
     return STATUS_NOT_FOUND;
 }
 
 NTSTATUS
-XdowsQueueEventAndWait(
+QueueEventAndWait(
     _Inout_ PXDOWS_SECURITY_EVENT Event,
     _Out_ PXDOWS_SECURITY_DECISION Decision
     )
@@ -597,16 +597,16 @@ XdowsQueueEventAndWait(
     BOOLEAN async = FALSE;
 
     RtlZeroMemory(Decision, sizeof(*Decision));
-    XdowsInitializeHeader(&Decision->Header, sizeof(*Decision));
+    InitializeHeader(&Decision->Header, sizeof(*Decision));
     Decision->Decision = XdowsSecurityDecisionAllow;
 
     if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
         return STATUS_INVALID_DEVICE_STATE;
     }
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
     if (Event->EventType < XDOWS_SECURITY_EVENT_TYPE_COUNT) {
-        g_XdowsDriverContext.ReceivedByType[Event->EventType]++;
+        g_DriverContext.ReceivedByType[Event->EventType]++;
     }
 
     //
@@ -615,18 +615,18 @@ XdowsQueueEventAndWait(
     // bounded without churning the 256-entry log ring or the bridge.
     //
     if (Event->EventType < XDOWS_SECURITY_EVENT_TYPE_COUNT) {
-        ULONG limit = XdowsThrottleLimitPerType[Event->EventType];
+        ULONG limit = ThrottleLimitPerType[Event->EventType];
         if (limit != 0) {
             ULONGLONG now = KeQueryInterruptTime();
-            PXDOWS_THROTTLE_SLOT slot = &g_XdowsDriverContext.Throttle[Event->EventType];
+            PXDOWS_THROTTLE_SLOT slot = &g_DriverContext.Throttle[Event->EventType];
             if (slot->Count == 0 ||
                 now - slot->WindowStart100ns >= XDOWS_THROTTLE_WINDOW_100NS) {
                 slot->WindowStart100ns = now;
                 slot->Count = 1;
             } else if (slot->Count >= limit) {
-                g_XdowsDriverContext.DroppedEventCount++;
-                g_XdowsDriverContext.DroppedByType[Event->EventType]++;
-                KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+                g_DriverContext.DroppedEventCount++;
+                g_DriverContext.DroppedByType[Event->EventType]++;
+                KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
                 return STATUS_NO_MORE_ENTRIES;
             } else {
                 slot->Count++;
@@ -634,39 +634,39 @@ XdowsQueueEventAndWait(
         }
     }
 
-    if (!g_XdowsDriverContext.ClientConnected) {
-        g_XdowsDriverContext.DroppedEventCount++;
+    if (!g_DriverContext.ClientConnected) {
+        g_DriverContext.DroppedEventCount++;
         if (Event->EventType < XDOWS_SECURITY_EVENT_TYPE_COUNT) {
-            g_XdowsDriverContext.DroppedByType[Event->EventType]++;
+            g_DriverContext.DroppedByType[Event->EventType]++;
         }
-        KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
-        XdowsLogWrite(XdowsSecurityLogWarning, Event->EventId, Event->CorrelationId, L"Queue", L"Event dropped because client is not connected.");
+        KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
+        LogWrite(XdowsSecurityLogWarning, Event->EventId, Event->CorrelationId, L"Queue", L"Event dropped because client is not connected.");
         return STATUS_DEVICE_NOT_CONNECTED;
     }
-    if (g_XdowsDriverContext.PendingEventCount >= XDOWS_SECURITY_MAX_PENDING_EVENTS) {
-        g_XdowsDriverContext.DroppedEventCount++;
+    if (g_DriverContext.PendingEventCount >= XDOWS_SECURITY_MAX_PENDING_EVENTS) {
+        g_DriverContext.DroppedEventCount++;
         if (Event->EventType < XDOWS_SECURITY_EVENT_TYPE_COUNT) {
-            g_XdowsDriverContext.DroppedByType[Event->EventType]++;
+            g_DriverContext.DroppedByType[Event->EventType]++;
         }
-        KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
-        XdowsLogWrite(XdowsSecurityLogWarning, Event->EventId, Event->CorrelationId, L"Queue", L"Event dropped because pending queue is full.");
+        KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
+        LogWrite(XdowsSecurityLogWarning, Event->EventId, Event->CorrelationId, L"Queue", L"Event dropped because pending queue is full.");
         return STATUS_INSUFFICIENT_RESOURCES;
     }
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
 
     pending = (PXDOWS_PENDING_EVENT)ExAllocatePool2(
         POOL_FLAG_NON_PAGED,
         sizeof(*pending),
         'swDX');
     if (pending == NULL) {
-        XdowsLogWrite(XdowsSecurityLogError, Event->EventId, Event->CorrelationId, L"Queue", L"Event allocation failed.");
+        LogWrite(XdowsSecurityLogError, Event->EventId, Event->CorrelationId, L"Queue", L"Event allocation failed.");
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
     RtlZeroMemory(pending, sizeof(*pending));
-    XdowsInitializeHeader(&Event->Header, sizeof(*Event));
+    InitializeHeader(&Event->Header, sizeof(*Event));
     if (Event->EventId == 0) {
-        Event->EventId = XdowsAllocateEventId();
+        Event->EventId = AllocateEventId();
     }
     if (Event->CorrelationId == 0) {
         Event->CorrelationId = Event->EventId;
@@ -683,33 +683,33 @@ XdowsQueueEventAndWait(
     // the origin thread returns immediately with the default Allow decision.
     // The poller removes and releases the entry on read.
     //
-    pending->Async = g_XdowsDriverContext.AsyncReviewEnabled &&
-        !XdowsIsCriticalEventType(Event->EventType);
+    pending->Async = g_DriverContext.AsyncReviewEnabled &&
+        !IsCriticalEventType(Event->EventType);
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
-    if (g_XdowsDriverContext.ClientConnected &&
-        g_XdowsDriverContext.PendingEventCount < XDOWS_SECURITY_MAX_PENDING_EVENTS) {
-        if (XdowsIsCriticalEventType(Event->EventType)) {
-            PLIST_ENTRY insertionPoint = g_XdowsDriverContext.PendingEvents.Flink;
-            while (insertionPoint != &g_XdowsDriverContext.PendingEvents) {
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
+    if (g_DriverContext.ClientConnected &&
+        g_DriverContext.PendingEventCount < XDOWS_SECURITY_MAX_PENDING_EVENTS) {
+        if (IsCriticalEventType(Event->EventType)) {
+            PLIST_ENTRY insertionPoint = g_DriverContext.PendingEvents.Flink;
+            while (insertionPoint != &g_DriverContext.PendingEvents) {
                 PXDOWS_PENDING_EVENT existing = CONTAINING_RECORD(insertionPoint, XDOWS_PENDING_EVENT, Link);
-                if (!XdowsIsCriticalEventType(existing->Event.EventType)) {
+                if (!IsCriticalEventType(existing->Event.EventType)) {
                     break;
                 }
                 insertionPoint = insertionPoint->Flink;
             }
             InsertTailList(insertionPoint, &pending->Link);
         } else {
-            InsertTailList(&g_XdowsDriverContext.PendingEvents, &pending->Link);
+            InsertTailList(&g_DriverContext.PendingEvents, &pending->Link);
         }
         pending->Linked = TRUE;
         linked = TRUE;
-        g_XdowsDriverContext.PendingEventCount++;
-        KeSetEvent(&g_XdowsDriverContext.PendingAvailableEvent, IO_NO_INCREMENT, FALSE);
+        g_DriverContext.PendingEventCount++;
+        KeSetEvent(&g_DriverContext.PendingAvailableEvent, IO_NO_INCREMENT, FALSE);
     } else {
-        g_XdowsDriverContext.DroppedEventCount++;
+        g_DriverContext.DroppedEventCount++;
         if (Event->EventType < XDOWS_SECURITY_EVENT_TYPE_COUNT) {
-            g_XdowsDriverContext.DroppedByType[Event->EventType]++;
+            g_DriverContext.DroppedByType[Event->EventType]++;
         }
     }
     //
@@ -717,11 +717,11 @@ XdowsQueueEventAndWait(
     // remove and free an async entry immediately after we release.
     //
     async = pending->Async;
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
 
     if (!linked) {
         ExFreePoolWithTag(pending, 'swDX');
-        XdowsLogWrite(XdowsSecurityLogWarning, Event->EventId, Event->CorrelationId, L"Queue", L"Event dropped before delivery.");
+        LogWrite(XdowsSecurityLogWarning, Event->EventId, Event->CorrelationId, L"Queue", L"Event dropped before delivery.");
         return STATUS_DEVICE_NOT_CONNECTED;
     }
 
@@ -754,13 +754,13 @@ XdowsQueueEventAndWait(
         // SubmitDecision uses the same lock, so copying the verdict and
         // resetting the notification event while holding it cannot lose a
         // final decision that arrives immediately after Pending.
-        KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
+        KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
         RtlCopyMemory(Decision, &pending->Decision, sizeof(*Decision));
         userDecisionPending = pending->UserDecisionPending;
         if (Decision->Decision == XdowsSecurityDecisionPending) {
             KeResetEvent(&pending->DecisionEvent);
-            KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
-            XdowsLogWrite(
+            KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
+            LogWrite(
                 XdowsSecurityLogInfo,
                 Event->EventId,
                 Event->CorrelationId,
@@ -768,19 +768,19 @@ XdowsQueueEventAndWait(
                 L"Confirmed threat is waiting for a user decision.");
             continue;
         }
-        KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+        KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
         break;
     }
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
     if (pending->Linked) {
         RemoveEntryList(&pending->Link);
         pending->Linked = FALSE;
-        if (g_XdowsDriverContext.PendingEventCount > 0) {
-            g_XdowsDriverContext.PendingEventCount--;
+        if (g_DriverContext.PendingEventCount > 0) {
+            g_DriverContext.PendingEventCount--;
         }
     }
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
 
     if (status == STATUS_SUCCESS) {
         if (userDecisionPending &&
@@ -791,7 +791,7 @@ XdowsQueueEventAndWait(
                 Decision->Reason,
                 RTL_NUMBER_OF(Decision->Reason),
                 L"user-decision-timeout-blocked");
-            XdowsLogWrite(
+            LogWrite(
                 XdowsSecurityLogWarning,
                 Event->EventId,
                 Event->CorrelationId,
@@ -812,13 +812,13 @@ XdowsQueueEventAndWait(
             userDecisionPending
                 ? L"user-decision-timeout-blocked"
                 : L"infrastructure-timeout-allow");
-        KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
+        KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
         if (Event->EventType < XDOWS_SECURITY_EVENT_TYPE_COUNT) {
-            g_XdowsDriverContext.TimedOutByType[Event->EventType]++;
+            g_DriverContext.TimedOutByType[Event->EventType]++;
         }
-        KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+        KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
         if (userDecisionPending) {
-            XdowsLogWriteStatus(
+            LogWriteStatus(
                 XdowsSecurityLogWarning,
                 Event->EventId,
                 Event->CorrelationId,
@@ -826,7 +826,7 @@ XdowsQueueEventAndWait(
                 L"User decision timed out; operation blocked",
                 status);
         } else {
-            XdowsLogWriteStatus(
+            LogWriteStatus(
                 XdowsSecurityLogWarning,
                 Event->EventId,
                 Event->CorrelationId,
@@ -841,7 +841,7 @@ XdowsQueueEventAndWait(
 }
 
 VOID
-XdowsGetState(
+GetState(
     _Out_ PXDOWS_SECURITY_STATE State
     )
 {
@@ -849,30 +849,30 @@ XdowsGetState(
     HANDLE clientProcessId;
 
     RtlZeroMemory(State, sizeof(*State));
-    XdowsInitializeHeader(&State->Header, sizeof(*State));
+    InitializeHeader(&State->Header, sizeof(*State));
 
-    KeAcquireSpinLock(&g_XdowsDriverContext.Lock, &oldIrql);
-    State->ClientConnected = g_XdowsDriverContext.ClientConnected ? 1 : 0;
-    State->PendingEventCount = g_XdowsDriverContext.PendingEventCount;
-    State->DroppedEventCount = g_XdowsDriverContext.DroppedEventCount;
-    State->ProcessProtectionEnabled = g_XdowsDriverContext.ProcessProtectionEnabled ? 1 : 0;
-    State->FileProtectionEnabled = g_XdowsDriverContext.FileProtectionEnabled ? 1 : 0;
-    clientProcessId = g_XdowsDriverContext.ClientProcessId;
-    State->ActiveModules = XdowsModulesGetActiveMask();
+    KeAcquireSpinLock(&g_DriverContext.Lock, &oldIrql);
+    State->ClientConnected = g_DriverContext.ClientConnected ? 1 : 0;
+    State->PendingEventCount = g_DriverContext.PendingEventCount;
+    State->DroppedEventCount = g_DriverContext.DroppedEventCount;
+    State->ProcessProtectionEnabled = g_DriverContext.ProcessProtectionEnabled ? 1 : 0;
+    State->FileProtectionEnabled = g_DriverContext.FileProtectionEnabled ? 1 : 0;
+    clientProcessId = g_DriverContext.ClientProcessId;
+    State->ActiveModules = ModulesGetActiveMask();
     State->ProtocolVersion = XDOWS_SECURITY_PROTOCOL_VERSION;
     State->Capabilities = XDOWS_SECURITY_CAPABILITIES;
     State->DriverBuildId = XDOWS_SECURITY_DRIVER_BUILD_ID;
-    RtlCopyMemory(State->ReceivedByType, g_XdowsDriverContext.ReceivedByType, sizeof(State->ReceivedByType));
-    RtlCopyMemory(State->DroppedByType, g_XdowsDriverContext.DroppedByType, sizeof(State->DroppedByType));
-    RtlCopyMemory(State->TimedOutByType, g_XdowsDriverContext.TimedOutByType, sizeof(State->TimedOutByType));
-    KeReleaseSpinLock(&g_XdowsDriverContext.Lock, oldIrql);
+    RtlCopyMemory(State->ReceivedByType, g_DriverContext.ReceivedByType, sizeof(State->ReceivedByType));
+    RtlCopyMemory(State->DroppedByType, g_DriverContext.DroppedByType, sizeof(State->DroppedByType));
+    RtlCopyMemory(State->TimedOutByType, g_DriverContext.TimedOutByType, sizeof(State->TimedOutByType));
+    KeReleaseSpinLock(&g_DriverContext.Lock, oldIrql);
 
-    State->SelfProtectionEnabled = XdowsSelfProtectIsProcessProtected(clientProcessId) ? 1 : 0;
+    State->SelfProtectionEnabled = SelfProtectIsProcessProtected(clientProcessId) ? 1 : 0;
     State->ProtectedProcessId = State->SelfProtectionEnabled
         ? HandleToULong(clientProcessId)
         : 0;
     State->StartupProtectionEnabled =
-        XdowsSelfProtectIsStartupProtectionEnabled() ? 1 : 0;
+        SelfProtectIsStartupProtectionEnabled() ? 1 : 0;
     State->BootProtectionEnabled =
-        XdowsFileProtectIsBootProtectionEnabled() ? 1 : 0;
+        FileProtectIsBootProtectionEnabled() ? 1 : 0;
 }

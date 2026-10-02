@@ -65,18 +65,18 @@ static XDOWS_BOOT_CONTEXT g_BootContext;
 
 DRIVER_INITIALIZE DriverEntry;
 
-static NTSTATUS XdowsBootDispatchUnsupported(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
-static NTSTATUS XdowsBootDispatchCreateClose(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
-static NTSTATUS XdowsBootDispatchCleanup(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
-static NTSTATUS XdowsBootDispatchDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
-static NTSTATUS XdowsBootDispatchWrite(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
-static NTSTATUS XdowsBootDispatchPassThrough(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
-static NTSTATUS XdowsBootDispatchPower(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
-static VOID XdowsBootUnload(_In_ PDRIVER_OBJECT DriverObject);
+static NTSTATUS BootDispatchUnsupported(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
+static NTSTATUS BootDispatchCreateClose(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
+static NTSTATUS BootDispatchCleanup(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
+static NTSTATUS BootDispatchDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
+static NTSTATUS BootDispatchWrite(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
+static NTSTATUS BootDispatchPassThrough(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
+static NTSTATUS BootDispatchPower(_In_ PDEVICE_OBJECT DeviceObject, _Inout_ PIRP Irp);
+static VOID BootUnload(_In_ PDRIVER_OBJECT DriverObject);
 
 static
 ULONG
-XdowsBootGetRequestorProcessId(
+BootGetRequestorProcessId(
     _In_ PIRP Irp
     )
 {
@@ -89,7 +89,7 @@ XdowsBootGetRequestorProcessId(
 
 static
 VOID
-XdowsBootInitializeHeader(
+BootInitializeHeader(
     _Out_ PXDOWS_BOOT_PROTOCOL_HEADER Header,
     _In_ ULONG Size
     )
@@ -100,7 +100,7 @@ XdowsBootInitializeHeader(
 
 static
 BOOLEAN
-XdowsBootHeaderIsValid(
+BootHeaderIsValid(
     _In_ PXDOWS_BOOT_PROTOCOL_HEADER Header,
     _In_ ULONG ExpectedSize
     )
@@ -112,7 +112,7 @@ XdowsBootHeaderIsValid(
 
 static
 NTSTATUS
-XdowsBootComplete(
+BootComplete(
     _Inout_ PIRP Irp,
     _In_ NTSTATUS Status,
     _In_ ULONG_PTR Information
@@ -126,7 +126,7 @@ XdowsBootComplete(
 
 static
 VOID
-XdowsBootLogBlockedWrite(
+BootLogBlockedWrite(
     _In_ ULONG Reason,
     _In_ NTSTATUS Status,
     _In_ LONGLONG Offset,
@@ -138,7 +138,7 @@ XdowsBootLogBlockedWrite(
     DbgPrintEx(
         DPFLTR_IHVDRIVER_ID,
         DPFLTR_WARNING_LEVEL,
-        "XdowsBootFilter: blocked write reason=%lu status=0x%08X offset=%I64d length=%lu\n",
+        "BootFilter: blocked write reason=%lu status=0x%08X offset=%I64d length=%lu\n",
         Reason,
         Status,
         Offset,
@@ -168,7 +168,7 @@ XdowsBootLogBlockedWrite(
 
 static
 NTSTATUS
-XdowsBootValidateClientProcess(
+BootValidateClientProcess(
     _In_ ULONG ProcessId
     )
 {
@@ -216,12 +216,12 @@ XdowsBootValidateClientProcess(
 
 static
 BOOLEAN
-XdowsBootCallerIsClient(
+BootCallerIsClient(
     _In_ PIRP Irp
     )
 {
     KIRQL oldIrql;
-    ULONG requestorProcessId = XdowsBootGetRequestorProcessId(Irp);
+    ULONG requestorProcessId = BootGetRequestorProcessId(Irp);
     BOOLEAN authorized;
 
     KeAcquireSpinLock(&g_BootContext.Lock, &oldIrql);
@@ -233,7 +233,7 @@ XdowsBootCallerIsClient(
 
 static
 VOID
-XdowsBootDisconnectClient(
+BootDisconnectClient(
     _In_ ULONG ProcessId
     )
 {
@@ -254,7 +254,7 @@ XdowsBootDisconnectClient(
          entry = entry->Flink) {
         PXDOWS_BOOT_PENDING_WRITE pending =
             CONTAINING_RECORD(entry, XDOWS_BOOT_PENDING_WRITE, Link);
-        pending->Decision = XdowsBootDecisionBlock;
+        pending->Decision = BootDecisionBlock;
         KeSetEvent(&pending->DecisionEvent, IO_NO_INCREMENT, FALSE);
     }
     KeReleaseSpinLock(&g_BootContext.Lock, oldIrql);
@@ -263,7 +263,7 @@ XdowsBootDisconnectClient(
 
 static
 BOOLEAN
-XdowsBootRangesAreValid(
+BootRangesAreValid(
     _In_ PXDOWS_BOOT_CONFIGURE_REQUEST Request
     )
 {
@@ -294,7 +294,7 @@ XdowsBootRangesAreValid(
 
 static
 NTSTATUS
-XdowsBootAttachDisk(
+BootAttachDisk(
     _In_ ULONG DiskNumber
     )
 {
@@ -366,7 +366,7 @@ XdowsBootAttachDisk(
 
 static
 BOOLEAN
-XdowsBootWriteIntersectsProtectedRange(
+BootWriteIntersectsProtectedRange(
     _In_ LONGLONG WriteOffset,
     _In_ ULONG WriteLength
     )
@@ -406,7 +406,7 @@ XdowsBootWriteIntersectsProtectedRange(
 
 static
 VOID
-XdowsBootReleasePendingReservation(
+BootReleasePendingReservation(
     _In_ ULONG Bytes
     )
 {
@@ -429,7 +429,7 @@ XdowsBootReleasePendingReservation(
 
 static
 VOID
-XdowsBootProcessProtectedWrite(
+BootProcessProtectedWrite(
     _In_ PDEVICE_OBJECT DeviceObject,
     _In_opt_ PVOID Context
     )
@@ -440,7 +440,7 @@ XdowsBootProcessProtectedWrite(
     KIRQL oldIrql;
     NTSTATUS waitStatus = STATUS_DEVICE_NOT_CONNECTED;
     BOOLEAN queued = FALSE;
-    ULONG decision = XdowsBootDecisionBlock;
+    ULONG decision = BootDecisionBlock;
 
     UNREFERENCED_PARAMETER(DeviceObject);
 
@@ -471,7 +471,7 @@ XdowsBootProcessProtectedWrite(
         KeAcquireSpinLock(&g_BootContext.Lock, &oldIrql);
         decision = waitStatus == STATUS_SUCCESS
             ? pending->Decision
-            : XdowsBootDecisionBlock;
+            : BootDecisionBlock;
         if (pending->Linked) {
             RemoveEntryList(&pending->Link);
             pending->Linked = FALSE;
@@ -482,7 +482,7 @@ XdowsBootProcessProtectedWrite(
         KeReleaseSpinLock(&g_BootContext.Lock, oldIrql);
     }
 
-    if (decision == XdowsBootDecisionAllow &&
+    if (decision == BootDecisionAllow &&
         !g_BootContext.Unloading &&
         g_BootContext.LowerDevice != NULL) {
         PIRP irp = pending->Irp;
@@ -492,27 +492,27 @@ XdowsBootProcessProtectedWrite(
         IoFreeWorkItem(workItem);
         IoSkipCurrentIrpStackLocation(irp);
         (VOID)IoCallDriver(g_BootContext.LowerDevice, irp);
-        XdowsBootReleasePendingReservation(reservedBytes);
+        BootReleasePendingReservation(reservedBytes);
         return;
     }
 
-    XdowsBootLogBlockedWrite(
+    BootLogBlockedWrite(
         queued && waitStatus != STATUS_SUCCESS ? 3u : (queued ? 4u : 1u),
         STATUS_ACCESS_DENIED,
         pending->Event.Offset,
         pending->Event.Length);
-    XdowsBootComplete(pending->Irp, STATUS_ACCESS_DENIED, 0);
+    BootComplete(pending->Irp, STATUS_ACCESS_DENIED, 0);
     IoFreeWorkItem(pending->WorkItem);
     {
         ULONG reservedBytes = pending->ReservedBytes;
         ExFreePoolWithTag(pending, XDOWS_BOOT_POOL_TAG);
-        XdowsBootReleasePendingReservation(reservedBytes);
+        BootReleasePendingReservation(reservedBytes);
     }
 }
 
 static
 NTSTATUS
-XdowsBootGetNextEvent(
+BootGetNextEvent(
     _Out_ PXDOWS_BOOT_WRITE_EVENT Event
     )
 {
@@ -556,16 +556,16 @@ XdowsBootGetNextEvent(
 
 static
 NTSTATUS
-XdowsBootSubmitDecision(
+BootSubmitDecision(
     _In_ PXDOWS_BOOT_DECISION Decision
     )
 {
     KIRQL oldIrql;
     PLIST_ENTRY entry;
 
-    if (!XdowsBootHeaderIsValid(&Decision->Header, sizeof(*Decision)) ||
-        (Decision->Decision != XdowsBootDecisionAllow &&
-         Decision->Decision != XdowsBootDecisionBlock)) {
+    if (!BootHeaderIsValid(&Decision->Header, sizeof(*Decision)) ||
+        (Decision->Decision != BootDecisionAllow &&
+         Decision->Decision != BootDecisionBlock)) {
         return STATUS_INVALID_PARAMETER;
     }
 
@@ -588,14 +588,14 @@ XdowsBootSubmitDecision(
 
 static
 VOID
-XdowsBootGetState(
+BootGetState(
     _Out_ PXDOWS_BOOT_STATE State
     )
 {
     KIRQL oldIrql;
 
     RtlZeroMemory(State, sizeof(*State));
-    XdowsBootInitializeHeader(&State->Header, sizeof(*State));
+    BootInitializeHeader(&State->Header, sizeof(*State));
     KeAcquireSpinLock(&g_BootContext.Lock, &oldIrql);
     State->ClientConnected = g_BootContext.ClientConnected ? 1u : 0u;
     State->Configured = g_BootContext.Configured ? 1u : 0u;
@@ -612,7 +612,7 @@ XdowsBootGetState(
 
 static
 NTSTATUS
-XdowsBootDispatchUnsupported(
+BootDispatchUnsupported(
     _In_ PDEVICE_OBJECT DeviceObject,
     _Inout_ PIRP Irp
     )
@@ -622,39 +622,39 @@ XdowsBootDispatchUnsupported(
         IoSkipCurrentIrpStackLocation(Irp);
         return IoCallDriver(g_BootContext.LowerDevice, Irp);
     }
-    return XdowsBootComplete(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
+    return BootComplete(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
 }
 
 static
 NTSTATUS
-XdowsBootDispatchCreateClose(
+BootDispatchCreateClose(
     _In_ PDEVICE_OBJECT DeviceObject,
     _Inout_ PIRP Irp
     )
 {
     if (DeviceObject == g_BootContext.ControlDevice) {
-        return XdowsBootComplete(Irp, STATUS_SUCCESS, 0);
+        return BootComplete(Irp, STATUS_SUCCESS, 0);
     }
-    return XdowsBootDispatchPassThrough(DeviceObject, Irp);
+    return BootDispatchPassThrough(DeviceObject, Irp);
 }
 
 static
 NTSTATUS
-XdowsBootDispatchCleanup(
+BootDispatchCleanup(
     _In_ PDEVICE_OBJECT DeviceObject,
     _Inout_ PIRP Irp
     )
 {
     if (DeviceObject == g_BootContext.ControlDevice) {
-        XdowsBootDisconnectClient(XdowsBootGetRequestorProcessId(Irp));
-        return XdowsBootComplete(Irp, STATUS_SUCCESS, 0);
+        BootDisconnectClient(BootGetRequestorProcessId(Irp));
+        return BootComplete(Irp, STATUS_SUCCESS, 0);
     }
-    return XdowsBootDispatchPassThrough(DeviceObject, Irp);
+    return BootDispatchPassThrough(DeviceObject, Irp);
 }
 
 static
 NTSTATUS
-XdowsBootDispatchDeviceControl(
+BootDispatchDeviceControl(
     _In_ PDEVICE_OBJECT DeviceObject,
     _Inout_ PIRP Irp
     )
@@ -667,7 +667,7 @@ XdowsBootDispatchDeviceControl(
     ULONG_PTR information = 0;
 
     if (DeviceObject != g_BootContext.ControlDevice) {
-        return XdowsBootDispatchPassThrough(DeviceObject, Irp);
+        return BootDispatchPassThrough(DeviceObject, Irp);
     }
 
     stack = IoGetCurrentIrpStackLocation(Irp);
@@ -683,15 +683,15 @@ XdowsBootDispatchDeviceControl(
             PXDOWS_BOOT_REGISTER_REQUEST request =
                 (PXDOWS_BOOT_REGISTER_REQUEST)buffer;
             ULONG requestorProcessId =
-                XdowsBootGetRequestorProcessId(Irp);
+                BootGetRequestorProcessId(Irp);
             KIRQL oldIrql;
 
-            if (!XdowsBootHeaderIsValid(&request->Header, sizeof(*request))) {
+            if (!BootHeaderIsValid(&request->Header, sizeof(*request))) {
                 status = STATUS_REVISION_MISMATCH;
                 break;
             }
             if (request->ClientProcessId != requestorProcessId ||
-                !NT_SUCCESS(XdowsBootValidateClientProcess(requestorProcessId))) {
+                !NT_SUCCESS(BootValidateClientProcess(requestorProcessId))) {
                 status = STATUS_ACCESS_DENIED;
                 break;
             }
@@ -704,7 +704,7 @@ XdowsBootDispatchDeviceControl(
                 PXDOWS_BOOT_REGISTER_RESPONSE response =
                     (PXDOWS_BOOT_REGISTER_RESPONSE)buffer;
                 RtlZeroMemory(response, sizeof(*response));
-                XdowsBootInitializeHeader(&response->Header, sizeof(*response));
+                BootInitializeHeader(&response->Header, sizeof(*response));
                 response->ProtocolVersion = XDOWS_BOOT_PROTOCOL_VERSION;
                 response->MaxRequestBytes = XDOWS_BOOT_MAX_REQUEST_BYTES;
                 response->MaxPendingBytes = XDOWS_BOOT_MAX_PENDING_BYTES;
@@ -722,7 +722,7 @@ XdowsBootDispatchDeviceControl(
         break;
 
     case IOCTL_XDOWS_BOOT_CONFIGURE:
-        if (!XdowsBootCallerIsClient(Irp)) {
+        if (!BootCallerIsClient(Irp)) {
             status = STATUS_ACCESS_DENIED;
             break;
         }
@@ -734,13 +734,13 @@ XdowsBootDispatchDeviceControl(
             PXDOWS_BOOT_CONFIGURE_REQUEST request =
                 (PXDOWS_BOOT_CONFIGURE_REQUEST)buffer;
             KIRQL oldIrql;
-            if (!XdowsBootHeaderIsValid(&request->Header, sizeof(*request)) ||
-                !XdowsBootRangesAreValid(request)) {
+            if (!BootHeaderIsValid(&request->Header, sizeof(*request)) ||
+                !BootRangesAreValid(request)) {
                 status = STATUS_INVALID_PARAMETER;
                 break;
             }
 
-            status = XdowsBootAttachDisk(request->DiskNumber);
+            status = BootAttachDisk(request->DiskNumber);
             if (!NT_SUCCESS(status)) {
                 break;
             }
@@ -758,7 +758,7 @@ XdowsBootDispatchDeviceControl(
         break;
 
     case IOCTL_XDOWS_BOOT_GET_NEXT_EVENT:
-        if (!XdowsBootCallerIsClient(Irp)) {
+        if (!BootCallerIsClient(Irp)) {
             status = STATUS_ACCESS_DENIED;
             break;
         }
@@ -766,14 +766,14 @@ XdowsBootDispatchDeviceControl(
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        status = XdowsBootGetNextEvent((PXDOWS_BOOT_WRITE_EVENT)buffer);
+        status = BootGetNextEvent((PXDOWS_BOOT_WRITE_EVENT)buffer);
         if (NT_SUCCESS(status)) {
             information = sizeof(XDOWS_BOOT_WRITE_EVENT);
         }
         break;
 
     case IOCTL_XDOWS_BOOT_SUBMIT_DECISION:
-        if (!XdowsBootCallerIsClient(Irp)) {
+        if (!BootCallerIsClient(Irp)) {
             status = STATUS_ACCESS_DENIED;
             break;
         }
@@ -781,11 +781,11 @@ XdowsBootDispatchDeviceControl(
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        status = XdowsBootSubmitDecision((PXDOWS_BOOT_DECISION)buffer);
+        status = BootSubmitDecision((PXDOWS_BOOT_DECISION)buffer);
         break;
 
     case IOCTL_XDOWS_BOOT_GET_STATE:
-        if (!XdowsBootCallerIsClient(Irp)) {
+        if (!BootCallerIsClient(Irp)) {
             status = STATUS_ACCESS_DENIED;
             break;
         }
@@ -793,18 +793,18 @@ XdowsBootDispatchDeviceControl(
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        XdowsBootGetState((PXDOWS_BOOT_STATE)buffer);
+        BootGetState((PXDOWS_BOOT_STATE)buffer);
         status = STATUS_SUCCESS;
         information = sizeof(XDOWS_BOOT_STATE);
         break;
     }
 
-    return XdowsBootComplete(Irp, status, information);
+    return BootComplete(Irp, status, information);
 }
 
 static
 NTSTATUS
-XdowsBootDispatchWrite(
+BootDispatchWrite(
     _In_ PDEVICE_OBJECT DeviceObject,
     _Inout_ PIRP Irp
     )
@@ -819,22 +819,22 @@ XdowsBootDispatchWrite(
 
     if (DeviceObject != g_BootContext.FilterDevice ||
         g_BootContext.LowerDevice == NULL) {
-        return XdowsBootDispatchUnsupported(DeviceObject, Irp);
+        return BootDispatchUnsupported(DeviceObject, Irp);
     }
 
     stack = IoGetCurrentIrpStackLocation(Irp);
     offset = stack->Parameters.Write.ByteOffset.QuadPart;
     length = stack->Parameters.Write.Length;
-    if (!XdowsBootWriteIntersectsProtectedRange(offset, length)) {
-        return XdowsBootDispatchPassThrough(DeviceObject, Irp);
+    if (!BootWriteIntersectsProtectedRange(offset, length)) {
+        return BootDispatchPassThrough(DeviceObject, Irp);
     }
 
     if (length == 0 || length > XDOWS_BOOT_MAX_REQUEST_BYTES) {
         KeAcquireSpinLock(&g_BootContext.Lock, &oldIrql);
         g_BootContext.BlockedResourceCount++;
         KeReleaseSpinLock(&g_BootContext.Lock, oldIrql);
-        XdowsBootLogBlockedWrite(2u, STATUS_INVALID_BUFFER_SIZE, offset, length);
-        return XdowsBootComplete(Irp, STATUS_ACCESS_DENIED, 0);
+        BootLogBlockedWrite(2u, STATUS_INVALID_BUFFER_SIZE, offset, length);
+        return BootComplete(Irp, STATUS_ACCESS_DENIED, 0);
     }
 
     KeAcquireSpinLock(&g_BootContext.Lock, &oldIrql);
@@ -856,12 +856,12 @@ XdowsBootDispatchWrite(
     KeReleaseSpinLock(&g_BootContext.Lock, oldIrql);
 
     if (!reserve) {
-        XdowsBootLogBlockedWrite(
+        BootLogBlockedWrite(
             clientConnected ? 2u : 1u,
             STATUS_ACCESS_DENIED,
             offset,
             length);
-        return XdowsBootComplete(Irp, STATUS_ACCESS_DENIED, 0);
+        return BootComplete(Irp, STATUS_ACCESS_DENIED, 0);
     }
 
     pending = (PXDOWS_BOOT_PENDING_WRITE)ExAllocatePool2(
@@ -869,33 +869,33 @@ XdowsBootDispatchWrite(
         sizeof(*pending),
         XDOWS_BOOT_POOL_TAG);
     if (pending == NULL) {
-        XdowsBootReleasePendingReservation(length);
-        XdowsBootLogBlockedWrite(2u, STATUS_INSUFFICIENT_RESOURCES, offset, length);
-        return XdowsBootComplete(Irp, STATUS_ACCESS_DENIED, 0);
+        BootReleasePendingReservation(length);
+        BootLogBlockedWrite(2u, STATUS_INSUFFICIENT_RESOURCES, offset, length);
+        return BootComplete(Irp, STATUS_ACCESS_DENIED, 0);
     }
 
     RtlZeroMemory(pending, sizeof(*pending));
     pending->Irp = Irp;
     pending->ReservedBytes = length;
-    pending->Decision = XdowsBootDecisionBlock;
-    XdowsBootInitializeHeader(&pending->Event.Header, sizeof(pending->Event));
+    pending->Decision = BootDecisionBlock;
+    BootInitializeHeader(&pending->Event.Header, sizeof(pending->Event));
     pending->Event.DiskNumber = g_BootContext.DiskNumber;
-    pending->Event.ProcessId = XdowsBootGetRequestorProcessId(Irp);
+    pending->Event.ProcessId = BootGetRequestorProcessId(Irp);
     pending->Event.Offset = offset;
     pending->Event.Length = length;
     KeInitializeEvent(&pending->DecisionEvent, NotificationEvent, FALSE);
     pending->WorkItem = IoAllocateWorkItem(DeviceObject);
     if (pending->WorkItem == NULL) {
         ExFreePoolWithTag(pending, XDOWS_BOOT_POOL_TAG);
-        XdowsBootReleasePendingReservation(length);
-        XdowsBootLogBlockedWrite(2u, STATUS_INSUFFICIENT_RESOURCES, offset, length);
-        return XdowsBootComplete(Irp, STATUS_ACCESS_DENIED, 0);
+        BootReleasePendingReservation(length);
+        BootLogBlockedWrite(2u, STATUS_INSUFFICIENT_RESOURCES, offset, length);
+        return BootComplete(Irp, STATUS_ACCESS_DENIED, 0);
     }
 
     IoMarkIrpPending(Irp);
     IoQueueWorkItem(
         pending->WorkItem,
-        XdowsBootProcessProtectedWrite,
+        BootProcessProtectedWrite,
         DelayedWorkQueue,
         pending);
     return STATUS_PENDING;
@@ -903,7 +903,7 @@ XdowsBootDispatchWrite(
 
 static
 NTSTATUS
-XdowsBootDispatchPassThrough(
+BootDispatchPassThrough(
     _In_ PDEVICE_OBJECT DeviceObject,
     _Inout_ PIRP Irp
     )
@@ -913,12 +913,12 @@ XdowsBootDispatchPassThrough(
         IoSkipCurrentIrpStackLocation(Irp);
         return IoCallDriver(g_BootContext.LowerDevice, Irp);
     }
-    return XdowsBootComplete(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
+    return BootComplete(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
 }
 
 static
 NTSTATUS
-XdowsBootDispatchPower(
+BootDispatchPower(
     _In_ PDEVICE_OBJECT DeviceObject,
     _Inout_ PIRP Irp
     )
@@ -929,12 +929,12 @@ XdowsBootDispatchPower(
         IoSkipCurrentIrpStackLocation(Irp);
         return PoCallDriver(g_BootContext.LowerDevice, Irp);
     }
-    return XdowsBootComplete(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
+    return BootComplete(Irp, STATUS_INVALID_DEVICE_REQUEST, 0);
 }
 
 static
 VOID
-XdowsBootUnload(
+BootUnload(
     _In_ PDRIVER_OBJECT DriverObject
     )
 {
@@ -946,7 +946,7 @@ XdowsBootUnload(
     KeAcquireSpinLock(&g_BootContext.Lock, &oldIrql);
     g_BootContext.Unloading = TRUE;
     KeReleaseSpinLock(&g_BootContext.Lock, oldIrql);
-    XdowsBootDisconnectClient(0);
+    BootDisconnectClient(0);
 
     (VOID)KeWaitForSingleObject(
         &g_BootContext.PendingZeroEvent,
@@ -1000,21 +1000,21 @@ DriverEntry(
     InitializeListHead(&g_BootContext.PendingWrites);
 
     for (index = 0; index <= IRP_MJ_MAXIMUM_FUNCTION; index++) {
-        DriverObject->MajorFunction[index] = XdowsBootDispatchUnsupported;
+        DriverObject->MajorFunction[index] = BootDispatchUnsupported;
     }
-    DriverObject->MajorFunction[IRP_MJ_CREATE] = XdowsBootDispatchCreateClose;
-    DriverObject->MajorFunction[IRP_MJ_CLOSE] = XdowsBootDispatchCreateClose;
-    DriverObject->MajorFunction[IRP_MJ_CLEANUP] = XdowsBootDispatchCleanup;
-    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = XdowsBootDispatchDeviceControl;
-    DriverObject->MajorFunction[IRP_MJ_WRITE] = XdowsBootDispatchWrite;
-    DriverObject->MajorFunction[IRP_MJ_READ] = XdowsBootDispatchPassThrough;
-    DriverObject->MajorFunction[IRP_MJ_PNP] = XdowsBootDispatchPassThrough;
-    DriverObject->MajorFunction[IRP_MJ_POWER] = XdowsBootDispatchPower;
-    DriverObject->MajorFunction[IRP_MJ_SHUTDOWN] = XdowsBootDispatchPassThrough;
-    DriverObject->MajorFunction[IRP_MJ_FLUSH_BUFFERS] = XdowsBootDispatchPassThrough;
-    DriverObject->MajorFunction[IRP_MJ_SCSI] = XdowsBootDispatchPassThrough;
-    DriverObject->MajorFunction[IRP_MJ_SYSTEM_CONTROL] = XdowsBootDispatchPassThrough;
-    DriverObject->DriverUnload = XdowsBootUnload;
+    DriverObject->MajorFunction[IRP_MJ_CREATE] = BootDispatchCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_CLOSE] = BootDispatchCreateClose;
+    DriverObject->MajorFunction[IRP_MJ_CLEANUP] = BootDispatchCleanup;
+    DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = BootDispatchDeviceControl;
+    DriverObject->MajorFunction[IRP_MJ_WRITE] = BootDispatchWrite;
+    DriverObject->MajorFunction[IRP_MJ_READ] = BootDispatchPassThrough;
+    DriverObject->MajorFunction[IRP_MJ_PNP] = BootDispatchPassThrough;
+    DriverObject->MajorFunction[IRP_MJ_POWER] = BootDispatchPower;
+    DriverObject->MajorFunction[IRP_MJ_SHUTDOWN] = BootDispatchPassThrough;
+    DriverObject->MajorFunction[IRP_MJ_FLUSH_BUFFERS] = BootDispatchPassThrough;
+    DriverObject->MajorFunction[IRP_MJ_SCSI] = BootDispatchPassThrough;
+    DriverObject->MajorFunction[IRP_MJ_SYSTEM_CONTROL] = BootDispatchPassThrough;
+    DriverObject->DriverUnload = BootUnload;
 
     RtlInitUnicodeString(&deviceName, XDOWS_BOOT_DEVICE_NAME);
     RtlInitUnicodeString(

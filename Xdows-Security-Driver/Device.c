@@ -65,14 +65,14 @@ XdowsSecurityDriverInitializeDevice(
         return status;
     }
 
-    status = XdowsInitializeGlobalContext(Device);
+    status = InitializeGlobalContext(Device);
     if (!NT_SUCCESS(status)) {
         return status;
     }
 
-    status = XdowsModulesInitialize();
+    status = ModulesInitialize();
     if (!NT_SUCCESS(status)) {
-        XdowsShutdownGlobalContext();
+        ShutdownGlobalContext();
     }
 
     return status;
@@ -137,6 +137,6 @@ XdowsSecurityDriverEvtDeviceContextCleanup(
 
     PAGED_CODE();
 
-    XdowsModulesShutdown();
-    XdowsShutdownGlobalContext();
+    ModulesShutdown();
+    ShutdownGlobalContext();
 }

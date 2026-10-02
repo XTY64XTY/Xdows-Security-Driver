@@ -108,7 +108,7 @@ static XDOWS_FILE_CONTEXT g_FileGuard;
 
 static
 VOID
-XdowsFileCopyNameInto(
+FileCopyNameInto(
     _Out_writes_(DestinationChars) PWCHAR Destination,
     _In_ SIZE_T DestinationChars,
     _In_opt_ PCUNICODE_STRING Source
@@ -116,21 +116,21 @@ XdowsFileCopyNameInto(
 
 static
 NTSTATUS
-XdowsFileAcquireName(
+FileAcquireName(
     _In_ PFLT_CALLBACK_DATA Data,
     _Outptr_result_maybenull_ PFLT_FILE_NAME_INFORMATION* NameInfo
     );
 
 static
 BOOLEAN
-XdowsFileLeafNameEquals(
+FileLeafNameEquals(
     _In_ PCUNICODE_STRING Path,
     _In_ PCWSTR Leaf
     );
 
 static
 BOOLEAN
-XdowsFileIsProtectedBootPath(
+FileIsProtectedBootPath(
     _In_opt_ PCUNICODE_STRING Path
     )
 {
@@ -183,7 +183,7 @@ XdowsFileIsProtectedBootPath(
 
 static
 NTSTATUS
-XdowsFileConsultBootPolicy(
+FileConsultBootPolicy(
     _In_ PCUNICODE_STRING Path,
     _In_ ULONG OriginatorPid,
     _Out_ PXDOWS_SECURITY_DECISION Decision
@@ -194,7 +194,7 @@ XdowsFileConsultBootPolicy(
     RtlZeroMemory(&event, sizeof(event));
     event.Header.Size = sizeof(event);
     event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
-    event.EventId = XdowsAllocateEventId();
+    event.EventId = AllocateEventId();
     event.CorrelationId = event.EventId;
     event.EventType = XdowsSecurityEventBootWrite;
     event.Flags = XdowsSecurityEventFlagUserModeRequired |
@@ -203,11 +203,11 @@ XdowsFileConsultBootPolicy(
     event.ProcessId = OriginatorPid;
     event.CreatingProcessId = HandleToULong(PsGetCurrentProcessId());
     event.KernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
-    XdowsFileCopyNameInto(
+    FileCopyNameInto(
         event.ImagePath,
         XDOWS_SECURITY_MAX_PATH_CHARS,
         Path);
-    return XdowsQueueEventAndWait(&event, Decision);
+    return QueueEventAndWait(&event, Decision);
 }
 
 //
@@ -222,7 +222,7 @@ typedef struct _XDOWS_CRITICAL_DLL {
     PCWSTR LeafName;
 } XDOWS_CRITICAL_DLL, *PXDOWS_CRITICAL_DLL;
 
-static const XDOWS_CRITICAL_DLL XdowsCriticalDlls[] = {
+static const XDOWS_CRITICAL_DLL CriticalDlls[] = {
     { L"ntdll.dll"  },
     { L"kernel32.dll" },
     { L"kernelbase.dll" },
@@ -236,7 +236,7 @@ static const XDOWS_CRITICAL_DLL XdowsCriticalDlls[] = {
 
 static
 BOOLEAN
-XdowsFileLeafNameEquals(
+FileLeafNameEquals(
     _In_ PCUNICODE_STRING Path,
     _In_ PCWSTR Leaf
     )
@@ -263,14 +263,14 @@ XdowsFileLeafNameEquals(
 
 static
 BOOLEAN
-XdowsFileIsCriticalSystemLibrary(
+FileIsCriticalSystemLibrary(
     _In_ PCUNICODE_STRING Path
     )
 {
     SIZE_T i;
 
-    for (i = 0; i < RTL_NUMBER_OF(XdowsCriticalDlls); i++) {
-        if (XdowsFileLeafNameEquals(Path, XdowsCriticalDlls[i].LeafName)) {
+    for (i = 0; i < RTL_NUMBER_OF(CriticalDlls); i++) {
+        if (FileLeafNameEquals(Path, CriticalDlls[i].LeafName)) {
             return TRUE;
         }
     }
@@ -284,7 +284,7 @@ XdowsFileIsCriticalSystemLibrary(
 //
 static
 BOOLEAN
-XdowsFileActorMayMutateCriticalDll(
+FileActorMayMutateCriticalDll(
     _In_ HANDLE RequestorProcessId
     )
 {
@@ -294,11 +294,11 @@ XdowsFileActorMayMutateCriticalDll(
     if (RequestorProcessId == NULL) {
         return FALSE;
     }
-    if (RequestorProcessId == g_XdowsDriverContext.ClientProcessId) {
+    if (RequestorProcessId == g_DriverContext.ClientProcessId) {
         return TRUE;
     }
 
-    signatureKnown = XdowsCodeIntegrityQueryProcessTrust(
+    signatureKnown = CodeIntegrityQueryProcessTrust(
         PsGetCurrentProcess(),
         &sourceTrusted);
     return signatureKnown && sourceTrusted;
@@ -316,9 +316,9 @@ XdowsFileActorMayMutateCriticalDll(
 // This is a pure kernel denial: STATUS_ACCESS_DENIED in PreCreate, no
 // bridge event, no user-mode round trip. CI-trusted processes and the
 // registered client are exempt (the same gate used for critical system
-// libraries), so Windows servicing and Xdows repairs keep working.
+// libraries), so Windows servicing and Xdows Security repairs keep working.
 //
-static const PCWSTR XdowsMasqueradeLeafNames[] = {
+static const PCWSTR MasqueradeLeafNames[] = {
     L"svchost.exe",   L"rundll32.exe",  L"regsvr32.exe", L"dllhost.exe",
     L"dllhst3g.exe",  L"lsass.exe",     L"csrss.exe",    L"smss.exe",
     L"winlogon.exe",  L"wininit.exe",   L"services.exe", L"spoolsv.exe",
@@ -333,7 +333,7 @@ static const PCWSTR XdowsMasqueradeLeafNames[] = {
 //
 static
 BOOLEAN
-XdowsFilePathContainsSegment(
+FilePathContainsSegment(
     _In_ PCUNICODE_STRING Path,
     _In_ PCWSTR Segment
     )
@@ -373,30 +373,30 @@ XdowsFilePathContainsSegment(
 //
 static
 BOOLEAN
-XdowsFileIsUserWritableLocation(
+FileIsUserWritableLocation(
     _In_ PCUNICODE_STRING Path
     )
 {
-    return XdowsFilePathContainsSegment(Path, L"AppData") ||
-        XdowsFilePathContainsSegment(Path, L"Downloads") ||
-        XdowsFilePathContainsSegment(Path, L"Desktop") ||
-        XdowsFilePathContainsSegment(Path, L"ProgramData");
+    return FilePathContainsSegment(Path, L"AppData") ||
+        FilePathContainsSegment(Path, L"Downloads") ||
+        FilePathContainsSegment(Path, L"Desktop") ||
+        FilePathContainsSegment(Path, L"ProgramData");
 }
 
 static
 BOOLEAN
-XdowsFileIsMasqueradedSystemBinary(
+FileIsMasqueradedSystemBinary(
     _In_ PCUNICODE_STRING Path
     )
 {
     ULONG i;
 
-    if (!XdowsFileIsUserWritableLocation(Path)) {
+    if (!FileIsUserWritableLocation(Path)) {
         return FALSE;
     }
 
-    for (i = 0; i < RTL_NUMBER_OF(XdowsMasqueradeLeafNames); i++) {
-        if (XdowsFileLeafNameEquals(Path, XdowsMasqueradeLeafNames[i])) {
+    for (i = 0; i < RTL_NUMBER_OF(MasqueradeLeafNames); i++) {
+        if (FileLeafNameEquals(Path, MasqueradeLeafNames[i])) {
             return TRUE;
         }
     }
@@ -412,7 +412,7 @@ XdowsFileIsMasqueradedSystemBinary(
 //
 static
 ULONG
-XdowsFileClassifyOperation(
+FileClassifyOperation(
     _In_ PFLT_CALLBACK_DATA Data
     )
 {
@@ -440,7 +440,7 @@ XdowsFileClassifyOperation(
 //
 static
 BOOLEAN
-XdowsFileCustomRuleMustBeBlocked(
+FileCustomRuleMustBeBlocked(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCUNICODE_STRING Path,
     _In_ ULONG BehaviorType,
@@ -471,7 +471,7 @@ XdowsFileCustomRuleMustBeBlocked(
     RtlZeroMemory(&decision, sizeof(decision));
     event.Header.Size = sizeof(event);
     event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
-    event.EventId = XdowsAllocateEventId();
+    event.EventId = AllocateEventId();
     event.CorrelationId = event.EventId;
     event.EventType = XdowsSecurityEventBehavior;
     event.BehaviorType = BehaviorType;
@@ -481,7 +481,7 @@ XdowsFileCustomRuleMustBeBlocked(
     event.ProcessId = originatorPid;
     event.CreatingProcessId = HandleToULong(PsGetCurrentProcessId());
     event.KernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
-    XdowsFileCopyNameInto(
+    FileCopyNameInto(
         event.ImagePath,
         XDOWS_SECURITY_MAX_PATH_CHARS,
         Path);
@@ -498,8 +498,8 @@ XdowsFileCustomRuleMustBeBlocked(
                 RTL_NUMBER_OF(ruleMessage),
                 L"Declarative rule %lu matched on file operation: %s",
                 RuleId,
-                XdowsBehaviorTypeName((XDOWS_SECURITY_BEHAVIOR_TYPE)BehaviorType)))) {
-            XdowsLogWrite(
+                BehaviorTypeName((XDOWS_SECURITY_BEHAVIOR_TYPE)BehaviorType)))) {
+            LogWrite(
                 XdowsSecurityLogWarning,
                 event.EventId,
                 event.CorrelationId,
@@ -508,12 +508,12 @@ XdowsFileCustomRuleMustBeBlocked(
         }
     }
 
-    status = XdowsQueueEventAndWait(&event, &decision);
+    status = QueueEventAndWait(&event, &decision);
 
     if (!NT_SUCCESS(status) ||
         decision.Decision == XdowsSecurityDecisionTimeout) {
         if (!failClosed) {
-            XdowsLogWriteStatus(
+            LogWriteStatus(
                 XdowsSecurityLogWarning,
                 event.EventId,
                 event.CorrelationId,
@@ -522,7 +522,7 @@ XdowsFileCustomRuleMustBeBlocked(
                 status);
             return FALSE;
         }
-        XdowsLogWriteStatus(
+        LogWriteStatus(
             XdowsSecurityLogWarning,
             event.EventId,
             event.CorrelationId,
@@ -538,7 +538,7 @@ XdowsFileCustomRuleMustBeBlocked(
         return FALSE;
     }
 
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogWarning,
         event.EventId,
         event.CorrelationId,
@@ -546,9 +546,9 @@ XdowsFileCustomRuleMustBeBlocked(
         L"Declarative file rule blocked by user decision.");
 
     if ((RuleFlags & XDOWS_SECURITY_RULE_FLAG_KILL_ACTOR) != 0) {
-        NTSTATUS killStatus = XdowsInjectionKillActor(originatorPid);
+        NTSTATUS killStatus = InjectionKillActor(originatorPid);
 
-        XdowsLogWriteStatus(
+        LogWriteStatus(
             XdowsSecurityLogWarning,
             event.EventId,
             event.CorrelationId,
@@ -570,7 +570,7 @@ XdowsFileCustomRuleMustBeBlocked(
 //
 static
 NTSTATUS
-XdowsFileConsultAutorunPolicy(
+FileConsultAutorunPolicy(
     _In_ PCUNICODE_STRING Path,
     _In_ ULONG OriginatorPid,
     _Out_ PXDOWS_SECURITY_DECISION Decision
@@ -581,7 +581,7 @@ XdowsFileConsultAutorunPolicy(
     RtlZeroMemory(&event, sizeof(event));
     event.Header.Size = sizeof(event);
     event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
-    event.EventId = XdowsAllocateEventId();
+    event.EventId = AllocateEventId();
     event.CorrelationId = event.EventId;
     event.EventType = XdowsSecurityEventBehavior;
     event.BehaviorType = XdowsSecurityBehaviorAutorunInf;
@@ -592,11 +592,11 @@ XdowsFileConsultAutorunPolicy(
     event.ProcessId = OriginatorPid;
     event.CreatingProcessId = HandleToULong(PsGetCurrentProcessId());
     event.KernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
-    XdowsFileCopyNameInto(
+    FileCopyNameInto(
         event.ImagePath,
         XDOWS_SECURITY_MAX_PATH_CHARS,
         Path);
-    return XdowsQueueEventAndWait(&event, Decision);
+    return QueueEventAndWait(&event, Decision);
 }
 
 //
@@ -605,7 +605,7 @@ XdowsFileConsultAutorunPolicy(
 //
 static
 BOOLEAN
-XdowsFileAutorunMutationMustBeBlocked(
+FileAutorunMutationMustBeBlocked(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCUNICODE_STRING Path
     )
@@ -617,7 +617,7 @@ XdowsFileAutorunMutationMustBeBlocked(
     if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
         status = STATUS_INVALID_DEVICE_STATE;
     } else {
-        status = XdowsFileConsultAutorunPolicy(
+        status = FileConsultAutorunPolicy(
             Path,
             HandleToULong(FltGetRequestorProcessIdEx(Data)),
             &decision);
@@ -628,7 +628,7 @@ XdowsFileAutorunMutationMustBeBlocked(
         return FALSE;
     }
 
-    XdowsLogWriteStatus(
+    LogWriteStatus(
         XdowsSecurityLogWarning,
         decision.EventId,
         decision.EventId,
@@ -642,7 +642,7 @@ XdowsFileAutorunMutationMustBeBlocked(
 
 static
 BOOLEAN
-XdowsFileBootMutationMustBeBlocked(
+FileBootMutationMustBeBlocked(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCUNICODE_STRING Path
     )
@@ -650,7 +650,7 @@ XdowsFileBootMutationMustBeBlocked(
     XDOWS_SECURITY_DECISION decision;
     NTSTATUS status;
 
-    if (!XdowsFileIsProtectedBootPath(Path)) {
+    if (!FileIsProtectedBootPath(Path)) {
         return FALSE;
     }
 
@@ -658,7 +658,7 @@ XdowsFileBootMutationMustBeBlocked(
     if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
         status = STATUS_INVALID_DEVICE_STATE;
     } else {
-        status = XdowsFileConsultBootPolicy(
+        status = FileConsultBootPolicy(
             Path,
             HandleToULong(FltGetRequestorProcessIdEx(Data)),
             &decision);
@@ -669,7 +669,7 @@ XdowsFileBootMutationMustBeBlocked(
         return FALSE;
     }
 
-    XdowsLogWriteStatus(
+    LogWriteStatus(
         XdowsSecurityLogWarning,
         decision.EventId,
         decision.EventId,
@@ -683,7 +683,7 @@ XdowsFileBootMutationMustBeBlocked(
 
 static
 FLT_PREOP_CALLBACK_STATUS
-XdowsFilePreWrite(
+FilePreWrite(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
     _Outptr_result_maybenull_ PVOID* CompletionContext
@@ -710,7 +710,7 @@ XdowsFilePreWrite(
         if (existingContext->BootProtected) {
             UNICODE_STRING protectedPath;
             RtlInitUnicodeString(&protectedPath, existingContext->Path);
-            if (XdowsFileBootMutationMustBeBlocked(Data, &protectedPath)) {
+            if (FileBootMutationMustBeBlocked(Data, &protectedPath)) {
                 FltReleaseContext(existingContext);
                 return FLT_PREOP_COMPLETE;
             }
@@ -720,8 +720,8 @@ XdowsFilePreWrite(
     }
 
     if (KeGetCurrentIrql() <= APC_LEVEL &&
-        NT_SUCCESS(XdowsFileAcquireName(Data, &bootName))) {
-        if (XdowsFileBootMutationMustBeBlocked(Data, &bootName->Name)) {
+        NT_SUCCESS(FileAcquireName(Data, &bootName))) {
+        if (FileBootMutationMustBeBlocked(Data, &bootName->Name)) {
             FltReleaseFileNameInformation(bootName);
             return FLT_PREOP_COMPLETE;
         }
@@ -767,7 +767,7 @@ XdowsFilePreWrite(
 //
 static
 BOOLEAN
-XdowsFileIsScannablePath(
+FileIsScannablePath(
     _In_opt_ PCUNICODE_STRING Path
     )
 {
@@ -800,7 +800,7 @@ XdowsFileIsScannablePath(
 //
 static
 NTSTATUS
-XdowsFileAcquireName(
+FileAcquireName(
     _In_ PFLT_CALLBACK_DATA Data,
     _Outptr_result_maybenull_ PFLT_FILE_NAME_INFORMATION* NameInfo
     )
@@ -827,7 +827,7 @@ XdowsFileAcquireName(
 
 static
 BOOLEAN
-XdowsFileDenyProtectedMutation(
+FileDenyProtectedMutation(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCUNICODE_STRING Path
     )
@@ -835,11 +835,11 @@ XdowsFileDenyProtectedMutation(
     HANDLE requestorProcessId;
 
     requestorProcessId = FltGetRequestorProcessIdEx(Data);
-    if (!XdowsSelfProtectShouldBlockFileMutation(Path, requestorProcessId)) {
+    if (!SelfProtectShouldBlockFileMutation(Path, requestorProcessId)) {
         return FALSE;
     }
 
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogWarning,
         0,
         0,
@@ -857,7 +857,7 @@ XdowsFileDenyProtectedMutation(
 //
 static
 VOID
-XdowsFileCopyNameInto(
+FileCopyNameInto(
     _Out_writes_(DestinationChars) PWCHAR Destination,
     _In_ SIZE_T DestinationChars,
     _In_opt_ PCUNICODE_STRING Source
@@ -893,7 +893,7 @@ XdowsFileCopyNameInto(
 //
 static
 NTSTATUS
-XdowsFileConsultPolicy(
+FileConsultPolicy(
     _In_ ULONG EventType,
     _In_ PCUNICODE_STRING Path,
     _In_ ULONG OriginatorPid,
@@ -905,7 +905,7 @@ XdowsFileConsultPolicy(
     RtlZeroMemory(&event, sizeof(event));
     event.Header.Size = sizeof(event);
     event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
-    event.EventId = XdowsAllocateEventId();
+    event.EventId = AllocateEventId();
     event.CorrelationId = event.EventId;
     event.EventType = EventType;
     event.Flags = XdowsSecurityEventFlagUserModeRequired |
@@ -916,9 +916,9 @@ XdowsFileConsultPolicy(
         ? XDOWS_FILE_CREATE_KERNEL_WAIT_TIMEOUT_MS
         : XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
 
-    XdowsFileCopyNameInto(event.ImagePath, XDOWS_SECURITY_MAX_PATH_CHARS, Path);
+    FileCopyNameInto(event.ImagePath, XDOWS_SECURITY_MAX_PATH_CHARS, Path);
 
-    return XdowsQueueEventAndWait(&event, Decision);
+    return QueueEventAndWait(&event, Decision);
 }
 
 //
@@ -935,7 +935,7 @@ XdowsFileConsultPolicy(
 //
 static
 BOOLEAN
-XdowsFileVerdictBlocks(
+FileVerdictBlocks(
     _In_ NTSTATUS QueueStatus,
     _In_ PXDOWS_SECURITY_DECISION Decision
     )
@@ -951,12 +951,12 @@ XdowsFileVerdictBlocks(
 //
 static
 VOID
-XdowsFileFailWithVirus(
+FileFailWithVirus(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PXDOWS_SECURITY_DECISION Decision
     )
 {
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogWarning,
         Decision->EventId,
         Decision->EventId,
@@ -974,7 +974,7 @@ XdowsFileFailWithVirus(
 //
 static
 BOOLEAN
-XdowsFileIsNameChangeClass(
+FileIsNameChangeClass(
     _In_ FILE_INFORMATION_CLASS InfoClass
     )
 {
@@ -986,7 +986,7 @@ XdowsFileIsNameChangeClass(
 
 static
 BOOLEAN
-XdowsFileIsDeleteDispositionClass(
+FileIsDeleteDispositionClass(
     _In_ FILE_INFORMATION_CLASS InfoClass
     )
 {
@@ -1008,7 +1008,7 @@ XdowsFileIsDeleteDispositionClass(
 //
 static
 BOOLEAN
-XdowsFileIsWriteOpen(
+FileIsWriteOpen(
     _In_ PFLT_CALLBACK_DATA Data
     )
 {
@@ -1044,7 +1044,7 @@ XdowsFileIsWriteOpen(
 //
 static
 BOOLEAN
-XdowsFilePassesSizeGate(
+FilePassesSizeGate(
     _In_ PCFLT_RELATED_OBJECTS FltObjects
     )
 {
@@ -1069,7 +1069,7 @@ XdowsFilePassesSizeGate(
 
 static
 FLT_PREOP_CALLBACK_STATUS
-XdowsFilePreCreate(
+FilePreCreate(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
     _Outptr_result_maybenull_ PVOID* CompletionContext
@@ -1090,11 +1090,11 @@ XdowsFilePreCreate(
 
     //
     // Determine whether this is a write-open before acquiring the file
-    // name. XdowsFileIsWriteOpen only inspects the create disposition and
+    // name. FileIsWriteOpen only inspects the create disposition and
     // desired access flags, so it is safe to call before
     // FltGetFileNameInformation.
     //
-    isWriteOpen = XdowsFileIsWriteOpen(Data);
+    isWriteOpen = FileIsWriteOpen(Data);
 
     //
     // Acquire the file name only for write-opens. Read-only opens (such as
@@ -1111,18 +1111,18 @@ XdowsFilePreCreate(
     // acquisition for read opens eliminates this code path entirely.
     //
     if (isWriteOpen) {
-        status = XdowsFileAcquireName(Data, &name);
+        status = FileAcquireName(Data, &name);
         if (!NT_SUCCESS(status)) {
             return FLT_PREOP_SUCCESS_NO_CALLBACK;
         }
 
-        if (XdowsFileDenyProtectedMutation(Data, &name->Name)) {
+        if (FileDenyProtectedMutation(Data, &name->Name)) {
             FltReleaseFileNameInformation(name);
             return FLT_PREOP_COMPLETE;
         }
 
-        if (XdowsFileIsProtectedBootPath(&name->Name)) {
-            if (XdowsFileBootMutationMustBeBlocked(Data, &name->Name)) {
+        if (FileIsProtectedBootPath(&name->Name)) {
+            if (FileBootMutationMustBeBlocked(Data, &name->Name)) {
                 FltReleaseFileNameInformation(name);
                 return FLT_PREOP_COMPLETE;
             }
@@ -1140,7 +1140,7 @@ XdowsFilePreCreate(
             RtlZeroMemory(bootContext, sizeof(*bootContext));
             bootContext->OriginatorPid =
                 HandleToULong(FltGetRequestorProcessIdEx(Data));
-            XdowsFileCopyNameInto(
+            FileCopyNameInto(
                 bootContext->Path,
                 RTL_NUMBER_OF(bootContext->Path),
                 &name->Name);
@@ -1155,10 +1155,10 @@ XdowsFilePreCreate(
         // This is a pure kernel denial (no bridge event, no user-mode round
         // trip), so it consumes no main-program memory.
         //
-        if (XdowsFileIsCriticalSystemLibrary(&name->Name) &&
-            !XdowsFileActorMayMutateCriticalDll(
+        if (FileIsCriticalSystemLibrary(&name->Name) &&
+            !FileActorMayMutateCriticalDll(
                 FltGetRequestorProcessIdEx(Data))) {
-            XdowsLogWrite(
+            LogWrite(
                 XdowsSecurityLogWarning,
                 0,
                 0,
@@ -1176,10 +1176,10 @@ XdowsFilePreCreate(
         // directory is denied synchronously by the kernel. Pure denial: no
         // bridge event, no user-mode round trip.
         //
-        if (XdowsFileIsMasqueradedSystemBinary(&name->Name) &&
-            !XdowsFileActorMayMutateCriticalDll(
+        if (FileIsMasqueradedSystemBinary(&name->Name) &&
+            !FileActorMayMutateCriticalDll(
                 FltGetRequestorProcessIdEx(Data))) {
-            XdowsLogWrite(
+            LogWrite(
                 XdowsSecurityLogWarning,
                 0,
                 0,
@@ -1195,8 +1195,8 @@ XdowsFilePreCreate(
         // autorun.inf interception. The kernel consults user mode for an
         // explicit allow/block decision and fails closed on timeout.
         //
-        if (XdowsFileLeafNameEquals(&name->Name, L"autorun.inf") &&
-            XdowsFileAutorunMutationMustBeBlocked(Data, &name->Name)) {
+        if (FileLeafNameEquals(&name->Name, L"autorun.inf") &&
+            FileAutorunMutationMustBeBlocked(Data, &name->Name)) {
             FltReleaseFileNameInformation(name);
             return FLT_PREOP_COMPLETE;
         }
@@ -1211,7 +1211,7 @@ XdowsFilePreCreate(
         // path suffix does not apply here (documented in the protocol doc).
         //
         {
-            ULONG fileOperation = XdowsFileClassifyOperation(Data);
+            ULONG fileOperation = FileClassifyOperation(Data);
             ULONG originatorPid = HandleToULong(FltGetRequestorProcessIdEx(Data));
             PEPROCESS requestor = FltGetRequestorProcess(Data);
             PCSTR requestorImage = (requestor != NULL)
@@ -1221,11 +1221,11 @@ XdowsFilePreCreate(
             ULONG ruleFlags = 0;
             ULONG ruleBehavior = 0;
 
-            if (!XdowsBehaviorIsInitiatorExcluded(
+            if (!BehaviorIsInitiatorExcluded(
                     XDOWS_SECURITY_EXCLUSION_SCOPE_FILE,
                     NULL,
                     requestorImage) &&
-                XdowsBehaviorEvaluateCustomRules(
+                BehaviorEvaluateCustomRules(
                     NULL,
                     requestorImage,
                     NULL,
@@ -1235,7 +1235,7 @@ XdowsFilePreCreate(
                     &ruleId,
                     &ruleFlags,
                     &ruleBehavior) &&
-                XdowsFileCustomRuleMustBeBlocked(
+                FileCustomRuleMustBeBlocked(
                     Data,
                     &name->Name,
                     ruleBehavior,
@@ -1246,7 +1246,7 @@ XdowsFilePreCreate(
             }
         }
 
-        if (!XdowsFileIsScannablePath(&name->Name)) {
+        if (!FileIsScannablePath(&name->Name)) {
             FltReleaseFileNameInformation(name);
             return FLT_PREOP_SUCCESS_NO_CALLBACK;
         }
@@ -1273,7 +1273,7 @@ XdowsFilePreCreate(
         BOOLEAN ransomBlock = FALSE;
 
         if (isWriteOpen && name != NULL) {
-            ransomBlock = XdowsRansomwareMonitorRecordWrite(
+            ransomBlock = RansomwareMonitorRecordWrite(
                 originatorPid, &name->Name);
 
             //
@@ -1293,19 +1293,19 @@ XdowsFilePreCreate(
                     ? PsGetProcessImageFileName(requestor)
                     : NULL;
 
-                if (XdowsBehaviorImageNameIsScriptHost(requestorImage)) {
-                    ransomBlock = XdowsRansomwareMonitorRecordSystemDelete(
+                if (BehaviorImageNameIsScriptHost(requestorImage)) {
+                    ransomBlock = RansomwareMonitorRecordSystemDelete(
                         originatorPid, &name->Name);
                 }
             }
         }
         if (!ransomBlock) {
-            ransomBlock = XdowsRansomwareMonitorIsFlagged(originatorPid);
+            ransomBlock = RansomwareMonitorIsFlagged(originatorPid);
         }
 
         if (ransomBlock) {
-            ULONGLONG ransomEventId = XdowsAllocateEventId();
-            XdowsLogWrite(
+            ULONGLONG ransomEventId = AllocateEventId();
+            LogWrite(
                 XdowsSecurityLogWarning,
                 ransomEventId,
                 ransomEventId,
@@ -1313,7 +1313,7 @@ XdowsFilePreCreate(
                 L"Ransomware rate threshold exceeded; operation blocked.");
             //
             // Complete the IRP directly with STATUS_VIRUS_INFECTED rather
-            // than calling XdowsFileFailWithVirus, which would log a
+            // than calling FileFailWithVirus, which would log a
             // misleading "blocked by user-mode verdict" message -- this
             // block originates from the in-kernel monitor.
             //
@@ -1336,7 +1336,7 @@ XdowsFilePreCreate(
 
 static
 FLT_POSTOP_CALLBACK_STATUS
-XdowsFilePostCreate(
+FilePostCreate(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
     _In_opt_ PVOID CompletionContext,
@@ -1397,7 +1397,7 @@ FailClosed:
     FltCancelFileOpen(FltObjects->Instance, FltObjects->FileObject);
     Data->IoStatus.Status = STATUS_ACCESS_DENIED;
     Data->IoStatus.Information = 0;
-    XdowsLogWriteStatus(
+    LogWriteStatus(
         XdowsSecurityLogError,
         0,
         0,
@@ -1410,7 +1410,7 @@ FailClosed:
 
 static
 FLT_PREOP_CALLBACK_STATUS
-XdowsFilePreCleanup(
+FilePreCleanup(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
     _Outptr_result_maybenull_ PVOID* CompletionContext
@@ -1437,14 +1437,14 @@ XdowsFilePreCleanup(
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    status = XdowsFileAcquireName(Data, &name);
+    status = FileAcquireName(Data, &name);
     if (!NT_SUCCESS(status)) {
         FltReleaseContext(dirtyContext);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    if (!XdowsFileIsScannablePath(&name->Name) ||
-        !XdowsFilePassesSizeGate(FltObjects)) {
+    if (!FileIsScannablePath(&name->Name) ||
+        !FilePassesSizeGate(FltObjects)) {
         FltReleaseFileNameInformation(name);
         FltReleaseContext(dirtyContext);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
@@ -1462,7 +1462,7 @@ XdowsFilePreCleanup(
 
     RtlZeroMemory(scanContext, sizeof(*scanContext));
     scanContext->OriginatorPid = dirtyContext->OriginatorPid;
-    XdowsFileCopyNameInto(
+    FileCopyNameInto(
         scanContext->Path,
         RTL_NUMBER_OF(scanContext->Path),
         &name->Name);
@@ -1479,7 +1479,7 @@ XdowsFilePreCleanup(
 
 static
 FLT_POSTOP_CALLBACK_STATUS
-XdowsFilePostCleanupWhenSafe(
+FilePostCleanupWhenSafe(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
     _In_opt_ PVOID CompletionContext,
@@ -1510,14 +1510,14 @@ XdowsFilePostCleanupWhenSafe(
     // Post-cleanup cannot fail the original operation; report the write
     // event so user-mode policy can act on it (e.g. mark the file).
     //
-    status = XdowsFileConsultPolicy(
+    status = FileConsultPolicy(
         XdowsSecurityEventFileWrite,
         &path,
         scanContext->OriginatorPid,
         &verdict);
 
-    if (XdowsFileVerdictBlocks(status, &verdict)) {
-        XdowsLogWrite(
+    if (FileVerdictBlocks(status, &verdict)) {
+        LogWrite(
             XdowsSecurityLogWarning,
             verdict.EventId,
             verdict.EventId,
@@ -1531,7 +1531,7 @@ XdowsFilePostCleanupWhenSafe(
 
 static
 FLT_POSTOP_CALLBACK_STATUS
-XdowsFilePostCleanup(
+FilePostCleanup(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
     _In_opt_ PVOID CompletionContext,
@@ -1552,12 +1552,12 @@ XdowsFilePostCleanup(
             FltObjects,
             CompletionContext,
             Flags,
-            XdowsFilePostCleanupWhenSafe,
+            FilePostCleanupWhenSafe,
             &returnStatus)) {
         return returnStatus;
     }
 
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogWarning,
         0,
         0,
@@ -1571,7 +1571,7 @@ XdowsFilePostCleanup(
 
 static
 FLT_PREOP_CALLBACK_STATUS
-XdowsFilePreSetInformation(
+FilePreSetInformation(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
     _Outptr_result_maybenull_ PVOID* CompletionContext
@@ -1593,8 +1593,8 @@ XdowsFilePreSetInformation(
 
     informationClass =
         Data->Iopb->Parameters.SetFileInformation.FileInformationClass;
-    if (!XdowsFileIsNameChangeClass(informationClass) &&
-        !XdowsFileIsDeleteDispositionClass(informationClass)) {
+    if (!FileIsNameChangeClass(informationClass) &&
+        !FileIsDeleteDispositionClass(informationClass)) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
@@ -1603,18 +1603,18 @@ XdowsFilePreSetInformation(
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    status = XdowsFileAcquireName(Data, &name);
+    status = FileAcquireName(Data, &name);
     if (!NT_SUCCESS(status)) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    if (XdowsFileDenyProtectedMutation(Data, &name->Name)) {
+    if (FileDenyProtectedMutation(Data, &name->Name)) {
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_COMPLETE;
     }
 
-    if (XdowsFileIsProtectedBootPath(&name->Name)) {
-        if (XdowsFileBootMutationMustBeBlocked(Data, &name->Name)) {
+    if (FileIsProtectedBootPath(&name->Name)) {
+        if (FileBootMutationMustBeBlocked(Data, &name->Name)) {
             FltReleaseFileNameInformation(name);
             return FLT_PREOP_COMPLETE;
         }
@@ -1628,10 +1628,10 @@ XdowsFilePreSetInformation(
     // primitive. Deny it synchronously unless the actor is a trusted system
     // component or the registered client.
     //
-    if (XdowsFileIsCriticalSystemLibrary(&name->Name) &&
-        !XdowsFileActorMayMutateCriticalDll(
+    if (FileIsCriticalSystemLibrary(&name->Name) &&
+        !FileActorMayMutateCriticalDll(
             FltGetRequestorProcessIdEx(Data))) {
-        XdowsLogWrite(
+        LogWrite(
             XdowsSecurityLogWarning,
             0,
             0,
@@ -1643,7 +1643,7 @@ XdowsFilePreSetInformation(
         return FLT_PREOP_COMPLETE;
     }
 
-    if (XdowsFileIsDeleteDispositionClass(informationClass)) {
+    if (FileIsDeleteDispositionClass(informationClass)) {
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
@@ -1683,7 +1683,7 @@ XdowsFilePreSetInformation(
             FltReleaseFileNameInformation(destinationName);
         }
         FltReleaseFileNameInformation(name);
-        XdowsLogWriteStatus(
+        LogWriteStatus(
             XdowsSecurityLogWarning,
             0,
             0,
@@ -1693,14 +1693,14 @@ XdowsFilePreSetInformation(
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    if (XdowsFileDenyProtectedMutation(Data, &destinationName->Name)) {
+    if (FileDenyProtectedMutation(Data, &destinationName->Name)) {
         FltReleaseFileNameInformation(destinationName);
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_COMPLETE;
     }
 
-    if (XdowsFileIsProtectedBootPath(&destinationName->Name)) {
-        if (XdowsFileBootMutationMustBeBlocked(Data, &destinationName->Name)) {
+    if (FileIsProtectedBootPath(&destinationName->Name)) {
+        if (FileBootMutationMustBeBlocked(Data, &destinationName->Name)) {
             FltReleaseFileNameInformation(destinationName);
             FltReleaseFileNameInformation(name);
             return FLT_PREOP_COMPLETE;
@@ -1714,10 +1714,10 @@ XdowsFilePreSetInformation(
     // Renaming a file TO a critical system library name (overwriting the
     // original DLL) is equally destructive. Guard the destination leaf too.
     //
-    if (XdowsFileIsCriticalSystemLibrary(&destinationName->Name) &&
-        !XdowsFileActorMayMutateCriticalDll(
+    if (FileIsCriticalSystemLibrary(&destinationName->Name) &&
+        !FileActorMayMutateCriticalDll(
             FltGetRequestorProcessIdEx(Data))) {
-        XdowsLogWrite(
+        LogWrite(
             XdowsSecurityLogWarning,
             0,
             0,
@@ -1730,14 +1730,14 @@ XdowsFilePreSetInformation(
         return FLT_PREOP_COMPLETE;
     }
 
-    if (!XdowsFileIsScannablePath(&name->Name) &&
-        !XdowsFileIsScannablePath(&destinationName->Name)) {
+    if (!FileIsScannablePath(&name->Name) &&
+        !FileIsScannablePath(&destinationName->Name)) {
         FltReleaseFileNameInformation(destinationName);
         FltReleaseFileNameInformation(name);
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
 
-    status = XdowsFileConsultPolicy(
+    status = FileConsultPolicy(
         XdowsSecurityEventFileRename,
         &name->Name,
         HandleToULong(FltGetRequestorProcessIdEx(Data)),
@@ -1745,8 +1745,8 @@ XdowsFilePreSetInformation(
     FltReleaseFileNameInformation(destinationName);
     FltReleaseFileNameInformation(name);
 
-    if (XdowsFileVerdictBlocks(status, &verdict)) {
-        XdowsFileFailWithVirus(Data, &verdict);
+    if (FileVerdictBlocks(status, &verdict)) {
+        FileFailWithVirus(Data, &verdict);
         return FLT_PREOP_COMPLETE;
     }
 
@@ -1755,14 +1755,14 @@ XdowsFilePreSetInformation(
 
 static
 NTSTATUS
-XdowsFileFilterUnload(
+FileFilterUnload(
     _In_ FLT_FILTER_UNLOAD_FLAGS Flags
     )
 {
     UNREFERENCED_PARAMETER(Flags);
 
     if (InterlockedCompareExchange(&g_FileGuard.UnloadPermitted, 0, 0) == 0) {
-        XdowsLogWrite(
+        LogWrite(
             XdowsSecurityLogWarning,
             0,
             0,
@@ -1774,14 +1774,14 @@ XdowsFileFilterUnload(
     if (g_FileGuard.FilterHandle != NULL) {
         PFLT_FILTER filter = g_FileGuard.FilterHandle;
         g_FileGuard.FilterHandle = NULL;
-        g_XdowsDriverContext.FileProtectionEnabled = FALSE;
+        g_DriverContext.FileProtectionEnabled = FALSE;
         FltUnregisterFilter(filter);
     }
     return STATUS_SUCCESS;
 }
 
 NTSTATUS
-XdowsFileProtectInitialize(
+FileProtectInitialize(
     VOID
     )
 {
@@ -1789,13 +1789,13 @@ XdowsFileProtectInitialize(
     PDRIVER_OBJECT driverObject;
     NTSTATUS status;
 
-    g_XdowsDriverContext.FileProtectionEnabled = FALSE;
+    g_DriverContext.FileProtectionEnabled = FALSE;
     if (g_FileGuard.FilterHandle != NULL) {
-        g_XdowsDriverContext.FileProtectionEnabled = TRUE;
+        g_DriverContext.FileProtectionEnabled = TRUE;
         return STATUS_SUCCESS;
     }
 
-    if (g_XdowsDriverContext.Device == NULL) {
+    if (g_DriverContext.Device == NULL) {
         return STATUS_INVALID_DEVICE_STATE;
     }
 
@@ -1804,9 +1804,9 @@ XdowsFileProtectInitialize(
     // active. The monitor is zero-initialized statically but the spinlock
     // must be set up explicitly.
     //
-    XdowsRansomwareMonitorInitialize();
+    RansomwareMonitorInitialize();
 
-    deviceObject = WdfDeviceWdmGetDeviceObject(g_XdowsDriverContext.Device);
+    deviceObject = WdfDeviceWdmGetDeviceObject(g_DriverContext.Device);
     if (deviceObject == NULL || deviceObject->DriverObject == NULL) {
         return STATUS_INVALID_DEVICE_STATE;
     }
@@ -1817,15 +1817,15 @@ XdowsFileProtectInitialize(
     ExInitializePushLock(&g_FileGuard.BootConfigurationLock);
 
     g_FileGuard.Operations[0].MajorFunction = IRP_MJ_CREATE;
-    g_FileGuard.Operations[0].PreOperation  = XdowsFilePreCreate;
-    g_FileGuard.Operations[0].PostOperation = XdowsFilePostCreate;
+    g_FileGuard.Operations[0].PreOperation  = FilePreCreate;
+    g_FileGuard.Operations[0].PostOperation = FilePostCreate;
     g_FileGuard.Operations[1].MajorFunction = IRP_MJ_WRITE;
-    g_FileGuard.Operations[1].PreOperation = XdowsFilePreWrite;
+    g_FileGuard.Operations[1].PreOperation = FilePreWrite;
     g_FileGuard.Operations[2].MajorFunction = IRP_MJ_CLEANUP;
-    g_FileGuard.Operations[2].PreOperation = XdowsFilePreCleanup;
-    g_FileGuard.Operations[2].PostOperation = XdowsFilePostCleanup;
+    g_FileGuard.Operations[2].PreOperation = FilePreCleanup;
+    g_FileGuard.Operations[2].PostOperation = FilePostCleanup;
     g_FileGuard.Operations[3].MajorFunction = IRP_MJ_SET_INFORMATION;
-    g_FileGuard.Operations[3].PreOperation  = XdowsFilePreSetInformation;
+    g_FileGuard.Operations[3].PreOperation  = FilePreSetInformation;
     g_FileGuard.Operations[4].MajorFunction = IRP_MJ_OPERATION_END;
 
     g_FileGuard.Contexts[0].ContextType = FLT_STREAMHANDLE_CONTEXT;
@@ -1838,35 +1838,35 @@ XdowsFileProtectInitialize(
     g_FileGuard.Registration.Version = FLT_REGISTRATION_VERSION;
     g_FileGuard.Registration.ContextRegistration = g_FileGuard.Contexts;
     g_FileGuard.Registration.OperationRegistration = g_FileGuard.Operations;
-    g_FileGuard.Registration.FilterUnloadCallback = XdowsFileFilterUnload;
+    g_FileGuard.Registration.FilterUnloadCallback = FileFilterUnload;
 
     status = FltRegisterFilter(driverObject,
                               &g_FileGuard.Registration,
                               &g_FileGuard.FilterHandle);
     if (!NT_SUCCESS(status)) {
         g_FileGuard.FilterHandle = NULL;
-        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"File",
+        LogWriteStatus(XdowsSecurityLogError, 0, 0, L"File",
             L"Minifilter registration failed", status);
         return status;
     }
 
     status = FltStartFiltering(g_FileGuard.FilterHandle);
     if (!NT_SUCCESS(status)) {
-        XdowsLogWriteStatus(XdowsSecurityLogError, 0, 0, L"File",
+        LogWriteStatus(XdowsSecurityLogError, 0, 0, L"File",
             L"Filtering start failed", status);
         FltUnregisterFilter(g_FileGuard.FilterHandle);
         g_FileGuard.FilterHandle = NULL;
         return status;
     }
 
-    g_XdowsDriverContext.FileProtectionEnabled = TRUE;
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"File",
+    g_DriverContext.FileProtectionEnabled = TRUE;
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"File",
         L"File minifilter active.");
     return STATUS_SUCCESS;
 }
 
 VOID
-XdowsFileProtectShutdown(
+FileProtectShutdown(
     VOID
     )
 {
@@ -1883,7 +1883,7 @@ XdowsFileProtectShutdown(
     (VOID)InterlockedExchange(&g_FileGuard.UnloadPermitted, 0);
     filter = g_FileGuard.FilterHandle;
     g_FileGuard.FilterHandle = NULL;
-    g_XdowsDriverContext.FileProtectionEnabled = FALSE;
+    g_DriverContext.FileProtectionEnabled = FALSE;
 
     if (filter != NULL) {
         //
@@ -1891,18 +1891,18 @@ XdowsFileProtectShutdown(
         // leave the operation table inside g_FileGuard untouched here.
         //
         FltUnregisterFilter(filter);
-        XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"File",
+        LogWrite(XdowsSecurityLogInfo, 0, 0, L"File",
             L"File minifilter stopped.");
     }
 }
 
 VOID
-XdowsFileProtectAuthorizeUnload(
+FileProtectAuthorizeUnload(
     VOID
     )
 {
     (VOID)InterlockedExchange(&g_FileGuard.UnloadPermitted, 1);
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogInfo,
         0,
         0,
@@ -1911,7 +1911,7 @@ XdowsFileProtectAuthorizeUnload(
 }
 
 VOID
-XdowsFileProtectRevokeUnload(
+FileProtectRevokeUnload(
     VOID
     )
 {
@@ -1923,15 +1923,15 @@ XdowsFileProtectRevokeUnload(
 // be considered for scanning (e.g. a fast-path trust check elsewhere).
 //
 BOOLEAN
-XdowsFileProtectIsPathScannable(
+FileProtectIsPathScannable(
     _In_opt_ PCUNICODE_STRING Path
     )
 {
-    return XdowsFileIsScannablePath(Path);
+    return FileIsScannablePath(Path);
 }
 
 NTSTATUS
-XdowsFileProtectConfigureBootProtection(
+FileProtectConfigureBootProtection(
     _In_ PXDOWS_SECURITY_BOOT_PROTECTION_REQUEST Request
     )
 {
@@ -1975,7 +1975,7 @@ XdowsFileProtectConfigureBootProtection(
     ExReleasePushLockExclusive(&g_FileGuard.BootConfigurationLock);
     KeLeaveCriticalRegion();
 
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogInfo,
         0,
         0,
@@ -1987,7 +1987,7 @@ XdowsFileProtectConfigureBootProtection(
 }
 
 BOOLEAN
-XdowsFileProtectIsBootProtectionEnabled(
+FileProtectIsBootProtectionEnabled(
     VOID
     )
 {

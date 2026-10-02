@@ -15,17 +15,17 @@ Abstract:
 EXTERN_C_START
 
 NTSTATUS
-XdowsModulesInitialize(
+ModulesInitialize(
     VOID
     );
 
 VOID
-XdowsModulesShutdown(
+ModulesShutdown(
     VOID
     );
 
 ULONG
-XdowsModulesGetActiveMask(
+ModulesGetActiveMask(
     VOID
     );
 

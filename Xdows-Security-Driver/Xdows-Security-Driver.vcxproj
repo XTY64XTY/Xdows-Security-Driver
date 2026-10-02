@@ -114,7 +114,7 @@
   <PropertyGroup>
     <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
     <SignMode>Off</SignMode>
-    <XdowsDriverTestCertificateSubject>Xdows Security Driver Test Certificate</XdowsDriverTestCertificateSubject>
+    <DriverTestCertificateSubject>Xdows Security Driver Test Certificate</DriverTestCertificateSubject>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <DebuggerFlavor>DbgengKernelDebugger</DebuggerFlavor>
@@ -192,18 +192,18 @@
     <FilesToPackage Include="$(TargetPath)" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <Target Name="XdowsTestSignDriverPackage" AfterTargets="Inf2Cat" Condition="'$(XdowsSkipTestSigning)' != 'true'">
+  <Target Name="TestSignDriverPackage" AfterTargets="Inf2Cat" Condition="'$(SkipTestSigning)' != 'true'">
     <PropertyGroup>
-      <XdowsDriverPackageDirectory>$(OutDir)$(TargetName)</XdowsDriverPackageDirectory>
-      <XdowsSignToolPath Condition="'$(XdowsSignToolPath)' == '' and Exists('$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\signtool.exe')">$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\signtool.exe</XdowsSignToolPath>
-      <XdowsSignToolPath Condition="'$(XdowsSignToolPath)' == '' and Exists('$(WindowsSdkDir)bin\$(WindowsTargetPlatformVersion)\x64\signtool.exe')">$(WindowsSdkDir)bin\$(WindowsTargetPlatformVersion)\x64\signtool.exe</XdowsSignToolPath>
-      <XdowsSignToolPath Condition="'$(XdowsSignToolPath)' == '' and Exists('$(WDKContentRoot)bin\$(TargetPlatformVersion)\x64\signtool.exe')">$(WDKContentRoot)bin\$(TargetPlatformVersion)\x64\signtool.exe</XdowsSignToolPath>
-      <XdowsSignToolPath Condition="'$(XdowsSignToolPath)' == '' and Exists('$(WDKBinRoot)\x64\signtool.exe')">$(WDKBinRoot)\x64\signtool.exe</XdowsSignToolPath>
-      <XdowsSignToolPath Condition="'$(XdowsSignToolPath)' == '' and Exists('$(WindowsSDKVersionedBinRoot)x64\signtool.exe')">$(WindowsSDKVersionedBinRoot)x64\signtool.exe</XdowsSignToolPath>
-      <XdowsSignToolPath Condition="'$(XdowsSignToolPath)' == '' and Exists('$(WindowsSDKVersionedBinRoot)x86\signtool.exe')">$(WindowsSDKVersionedBinRoot)x86\signtool.exe</XdowsSignToolPath>
+      <DriverPackageDirectory>$(OutDir)$(TargetName)</DriverPackageDirectory>
+      <SignToolPath Condition="'$(SignToolPath)' == '' and Exists('$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\signtool.exe')">$(WindowsSdkDir)bin\$(TargetPlatformVersion)\x64\signtool.exe</SignToolPath>
+      <SignToolPath Condition="'$(SignToolPath)' == '' and Exists('$(WindowsSdkDir)bin\$(WindowsTargetPlatformVersion)\x64\signtool.exe')">$(WindowsSdkDir)bin\$(WindowsTargetPlatformVersion)\x64\signtool.exe</SignToolPath>
+      <SignToolPath Condition="'$(SignToolPath)' == '' and Exists('$(WDKContentRoot)bin\$(TargetPlatformVersion)\x64\signtool.exe')">$(WDKContentRoot)bin\$(TargetPlatformVersion)\x64\signtool.exe</SignToolPath>
+      <SignToolPath Condition="'$(SignToolPath)' == '' and Exists('$(WDKBinRoot)\x64\signtool.exe')">$(WDKBinRoot)\x64\signtool.exe</SignToolPath>
+      <SignToolPath Condition="'$(SignToolPath)' == '' and Exists('$(WindowsSDKVersionedBinRoot)x64\signtool.exe')">$(WindowsSDKVersionedBinRoot)x64\signtool.exe</SignToolPath>
+      <SignToolPath Condition="'$(SignToolPath)' == '' and Exists('$(WindowsSDKVersionedBinRoot)x86\signtool.exe')">$(WindowsSDKVersionedBinRoot)x86\signtool.exe</SignToolPath>
     </PropertyGroup>
-    <Error Condition="'$(XdowsSignToolPath)' == ''" Text="signtool.exe was not found in the Windows SDK bin directory." />
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\tools\Ensure-TestDriverSigning.ps1&quot; -PackageDirectory &quot;$(XdowsDriverPackageDirectory)&quot; -SignTool &quot;$(XdowsSignToolPath)&quot; -Subject &quot;$(XdowsDriverTestCertificateSubject)&quot;" />
+    <Error Condition="'$(SignToolPath)' == ''" Text="signtool.exe was not found in the Windows SDK bin directory." />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\tools\Ensure-TestDriverSigning.ps1&quot; -PackageDirectory &quot;$(DriverPackageDirectory)&quot; -SignTool &quot;$(SignToolPath)&quot; -Subject &quot;$(DriverTestCertificateSubject)&quot;" />
   </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

@@ -60,7 +60,7 @@ PsGetProcessImageFileName(
 
 static
 VOID
-XdowsRegistryCopyUnicodeString(
+RegistryCopyUnicodeString(
     _Out_writes_(DestinationChars) PWCHAR Destination,
     _In_ SIZE_T DestinationChars,
     _In_opt_ PCUNICODE_STRING Source
@@ -88,7 +88,7 @@ XdowsRegistryCopyUnicodeString(
 
 static
 BOOLEAN
-XdowsRegistryPrefixHasBoundary(
+RegistryPrefixHasBoundary(
     _In_ PCUNICODE_STRING Prefix,
     _In_ PCUNICODE_STRING Value
     )
@@ -108,7 +108,7 @@ XdowsRegistryPrefixHasBoundary(
 
 static
 BOOLEAN
-XdowsRegistryPathMatchesRules(
+RegistryPathMatchesRules(
     _In_ PCUNICODE_STRING Path,
     _In_ BOOLEAN IncludeAncestor
     )
@@ -127,8 +127,8 @@ XdowsRegistryPathMatchesRules(
             UNICODE_STRING rule;
 
             RtlInitUnicodeString(&rule, g_RegistryGuard.RulePaths[index]);
-            if (XdowsRegistryPrefixHasBoundary(&rule, Path) ||
-                (IncludeAncestor && XdowsRegistryPrefixHasBoundary(Path, &rule))) {
+            if (RegistryPrefixHasBoundary(&rule, Path) ||
+                (IncludeAncestor && RegistryPrefixHasBoundary(Path, &rule))) {
                 matches = TRUE;
                 break;
             }
@@ -141,7 +141,7 @@ XdowsRegistryPathMatchesRules(
 
 static
 NTSTATUS
-XdowsRegistryGetObjectPath(
+RegistryGetObjectPath(
     _In_ PVOID Object,
     _Outptr_result_maybenull_ PUNICODE_STRING* Path
     )
@@ -161,7 +161,7 @@ XdowsRegistryGetObjectPath(
 
 static
 NTSTATUS
-XdowsRegistryBuildCreatePath(
+RegistryBuildCreatePath(
     _In_ PREG_CREATE_KEY_INFORMATION Information,
     _Out_writes_(PathChars) PWCHAR PathBuffer,
     _In_ SIZE_T PathChars,
@@ -199,7 +199,7 @@ XdowsRegistryBuildCreatePath(
         return STATUS_OBJECT_PATH_INVALID;
     }
 
-    status = XdowsRegistryGetObjectPath(Information->RootObject, &rootPath);
+    status = RegistryGetObjectPath(Information->RootObject, &rootPath);
     if (!NT_SUCCESS(status) || rootPath == NULL || rootPath->Buffer == NULL) {
         return NT_SUCCESS(status) ? STATUS_OBJECT_PATH_INVALID : status;
     }
@@ -230,7 +230,7 @@ Exit:
 
 static
 VOID
-XdowsRegistryCopyCurrentProcessPath(
+RegistryCopyCurrentProcessPath(
     _Out_writes_(DestinationChars) PWCHAR Destination,
     _In_ SIZE_T DestinationChars
     )
@@ -239,14 +239,14 @@ XdowsRegistryCopyCurrentProcessPath(
 
     if (NT_SUCCESS(SeLocateProcessImageName(PsGetCurrentProcess(), &imagePath)) &&
         imagePath != NULL) {
-        XdowsRegistryCopyUnicodeString(Destination, DestinationChars, imagePath);
+        RegistryCopyUnicodeString(Destination, DestinationChars, imagePath);
         ExFreePool(imagePath);
     }
 }
 
 static
 NTSTATUS
-XdowsRegistryDecideMutation(
+RegistryDecideMutation(
     _In_ PCUNICODE_STRING Path,
     _In_opt_ PCUNICODE_STRING ValueName,
     _In_ XDOWS_SECURITY_REGISTRY_OPERATION Operation,
@@ -260,20 +260,20 @@ XdowsRegistryDecideMutation(
     BOOLEAN sourceTrusted = FALSE;
     NTSTATUS status;
 
-    if (!XdowsRegistryPathMatchesRules(Path, IncludeAncestor)) {
+    if (!RegistryPathMatchesRules(Path, IncludeAncestor)) {
         return STATUS_SUCCESS;
     }
     // Registry callbacks can originate from the kernel/System process. Kernel
     // code is outside this user-mode persistence threat model, and blocking
     // PID 4 breaks ordinary Windows servicing and policy application.
-    if (processId <= 4 || XdowsIsRegisteredClientProcess(processId)) {
+    if (processId <= 4 || IsRegisteredClientProcess(processId)) {
         return STATUS_SUCCESS;
     }
 
     // The injection module owns the asynchronous CI cache and starts before
     // RegistryProtect. Reuse its PID+creation-time verdict so catalog-signed
     // Windows components never enter the synchronous user-mode decision path.
-    signatureKnown = XdowsCodeIntegrityQueryProcessTrust(
+    signatureKnown = CodeIntegrityQueryProcessTrust(
         PsGetCurrentProcess(),
         &sourceTrusted);
     if (signatureKnown && sourceTrusted) {
@@ -288,7 +288,7 @@ XdowsRegistryDecideMutation(
     // is unavailable, so an exclusion only removes consultation noise for
     // known-heavy applications (games, installers, IMEs, build tools).
     //
-    if (XdowsBehaviorIsInitiatorExcluded(
+    if (BehaviorIsInitiatorExcluded(
             XDOWS_SECURITY_EXCLUSION_SCOPE_REGISTRY,
             NULL,
             PsGetProcessImageFileName(PsGetCurrentProcess()))) {
@@ -299,7 +299,7 @@ XdowsRegistryDecideMutation(
     RtlZeroMemory(&decision, sizeof(decision));
     event.Header.Size = sizeof(event);
     event.Header.Version = XDOWS_SECURITY_PROTOCOL_VERSION;
-    event.EventId = XdowsAllocateEventId();
+    event.EventId = AllocateEventId();
     event.CorrelationId = event.EventId;
     event.EventType = XdowsSecurityEventRegistryWrite;
     event.Flags = XdowsSecurityEventFlagUserModeRequired;
@@ -308,24 +308,24 @@ XdowsRegistryDecideMutation(
     event.CreatingThreadId = HandleToULong(PsGetCurrentThreadId());
     event.KernelWaitTimeoutMs = XDOWS_SECURITY_DEFAULT_KERNEL_WAIT_TIMEOUT_MS;
     event.RegistryOperation = Operation;
-    XdowsRegistryCopyUnicodeString(
+    RegistryCopyUnicodeString(
         event.ImagePath,
         RTL_NUMBER_OF(event.ImagePath),
         Path);
-    XdowsRegistryCopyUnicodeString(
+    RegistryCopyUnicodeString(
         event.RegistryValueName,
         RTL_NUMBER_OF(event.RegistryValueName),
         ValueName);
-    XdowsRegistryCopyCurrentProcessPath(
+    RegistryCopyCurrentProcessPath(
         event.ActorImagePath,
         RTL_NUMBER_OF(event.ActorImagePath));
 
     status = KeGetCurrentIrql() == PASSIVE_LEVEL
-        ? XdowsQueueEventAndWait(&event, &decision)
+        ? QueueEventAndWait(&event, &decision)
         : STATUS_INVALID_DEVICE_STATE;
     if (!NT_SUCCESS(status) ||
         decision.Decision == XdowsSecurityDecisionTimeout) {
-        XdowsLogWriteStatus(
+        LogWriteStatus(
             XdowsSecurityLogWarning,
             event.EventId,
             event.CorrelationId,
@@ -339,7 +339,7 @@ XdowsRegistryDecideMutation(
         return STATUS_SUCCESS;
     }
 
-    XdowsLogWriteStatus(
+    LogWriteStatus(
         XdowsSecurityLogWarning,
         event.EventId,
         event.CorrelationId,
@@ -357,8 +357,8 @@ XdowsRegistryDecideMutation(
     // denied regardless of whether the kill succeeds.
     //
     if (decision.ResultCode == XDOWS_DECISION_RESULT_KILL_ACTOR) {
-        NTSTATUS killStatus = XdowsInjectionKillActor(processId);
-        XdowsLogWriteStatus(
+        NTSTATUS killStatus = InjectionKillActor(processId);
+        LogWriteStatus(
             XdowsSecurityLogWarning,
             event.EventId,
             event.CorrelationId,
@@ -372,7 +372,7 @@ XdowsRegistryDecideMutation(
 
 static
 NTSTATUS
-XdowsRegistryDecideObjectMutation(
+RegistryDecideObjectMutation(
     _In_ PVOID Object,
     _In_opt_ PCUNICODE_STRING ValueName,
     _In_ XDOWS_SECURITY_REGISTRY_OPERATION Operation,
@@ -382,12 +382,12 @@ XdowsRegistryDecideObjectMutation(
     PUNICODE_STRING path = NULL;
     NTSTATUS status;
 
-    status = XdowsRegistryGetObjectPath(Object, &path);
+    status = RegistryGetObjectPath(Object, &path);
     if (!NT_SUCCESS(status) || path == NULL) {
         return STATUS_SUCCESS;
     }
 
-    status = XdowsRegistryDecideMutation(
+    status = RegistryDecideMutation(
         path,
         ValueName,
         Operation,
@@ -398,7 +398,7 @@ XdowsRegistryDecideObjectMutation(
 
 static
 NTSTATUS
-XdowsRegistryDecideRename(
+RegistryDecideRename(
     _In_ PREG_RENAME_KEY_INFORMATION Information
     )
 {
@@ -416,13 +416,13 @@ XdowsRegistryDecideRename(
         return STATUS_SUCCESS;
     }
 
-    status = XdowsRegistryGetObjectPath(Information->Object, &sourcePath);
+    status = RegistryGetObjectPath(Information->Object, &sourcePath);
     if (!NT_SUCCESS(status) || sourcePath == NULL || sourcePath->Buffer == NULL) {
         return STATUS_SUCCESS;
     }
 
-    if (XdowsRegistryPathMatchesRules(sourcePath, TRUE)) {
-        status = XdowsRegistryDecideMutation(
+    if (RegistryPathMatchesRules(sourcePath, TRUE)) {
+        status = RegistryDecideMutation(
             sourcePath,
             Information->NewName,
             XdowsSecurityRegistryOperationRenameKey,
@@ -456,7 +456,7 @@ XdowsRegistryDecideRename(
         Information->NewName->Length);
     destinationBuffer[destinationParentChars + newNameChars] = UNICODE_NULL;
     RtlInitUnicodeString(&destinationPath, destinationBuffer);
-    status = XdowsRegistryDecideMutation(
+    status = RegistryDecideMutation(
         &destinationPath,
         Information->NewName,
         XdowsSecurityRegistryOperationRenameKey,
@@ -467,7 +467,7 @@ XdowsRegistryDecideRename(
 
 static
 NTSTATUS
-XdowsRegistryCallback(
+RegistryCallback(
     _In_opt_ PVOID CallbackContext,
     _In_ PVOID Argument1,
     _In_ PVOID Argument2
@@ -477,7 +477,7 @@ XdowsRegistryCallback(
 
     UNREFERENCED_PARAMETER(CallbackContext);
 
-    if (!XdowsRegistryProtectIsEnabled()) {
+    if (!RegistryProtectIsEnabled()) {
         return STATUS_SUCCESS;
     }
 
@@ -488,13 +488,13 @@ XdowsRegistryCallback(
             (PREG_CREATE_KEY_INFORMATION)Argument2;
         WCHAR pathBuffer[XDOWS_SECURITY_MAX_PATH_CHARS];
         UNICODE_STRING path;
-        NTSTATUS status = XdowsRegistryBuildCreatePath(
+        NTSTATUS status = RegistryBuildCreatePath(
             info,
             pathBuffer,
             RTL_NUMBER_OF(pathBuffer),
             &path);
         return NT_SUCCESS(status)
-            ? XdowsRegistryDecideMutation(
+            ? RegistryDecideMutation(
                 &path,
                 NULL,
                 XdowsSecurityRegistryOperationCreateKey,
@@ -506,7 +506,7 @@ XdowsRegistryCallback(
         PREG_SET_VALUE_KEY_INFORMATION info =
             (PREG_SET_VALUE_KEY_INFORMATION)Argument2;
         return info != NULL
-            ? XdowsRegistryDecideObjectMutation(
+            ? RegistryDecideObjectMutation(
                 info->Object,
                 info->ValueName,
                 XdowsSecurityRegistryOperationSetValue,
@@ -518,7 +518,7 @@ XdowsRegistryCallback(
         PREG_DELETE_VALUE_KEY_INFORMATION info =
             (PREG_DELETE_VALUE_KEY_INFORMATION)Argument2;
         return info != NULL
-            ? XdowsRegistryDecideObjectMutation(
+            ? RegistryDecideObjectMutation(
                 info->Object,
                 info->ValueName,
                 XdowsSecurityRegistryOperationDeleteValue,
@@ -530,7 +530,7 @@ XdowsRegistryCallback(
         PREG_DELETE_KEY_INFORMATION info =
             (PREG_DELETE_KEY_INFORMATION)Argument2;
         return info != NULL
-            ? XdowsRegistryDecideObjectMutation(
+            ? RegistryDecideObjectMutation(
                 info->Object,
                 NULL,
                 XdowsSecurityRegistryOperationDeleteKey,
@@ -541,14 +541,14 @@ XdowsRegistryCallback(
     {
         PREG_RENAME_KEY_INFORMATION info =
             (PREG_RENAME_KEY_INFORMATION)Argument2;
-        return XdowsRegistryDecideRename(info);
+        return RegistryDecideRename(info);
     }
     case RegNtPreRestoreKey:
     {
         PREG_RESTORE_KEY_INFORMATION info =
             (PREG_RESTORE_KEY_INFORMATION)Argument2;
         return info != NULL
-            ? XdowsRegistryDecideObjectMutation(
+            ? RegistryDecideObjectMutation(
                 info->Object,
                 NULL,
                 XdowsSecurityRegistryOperationRestoreKey,
@@ -560,7 +560,7 @@ XdowsRegistryCallback(
         PREG_REPLACE_KEY_INFORMATION info =
             (PREG_REPLACE_KEY_INFORMATION)Argument2;
         return info != NULL
-            ? XdowsRegistryDecideObjectMutation(
+            ? RegistryDecideObjectMutation(
                 info->Object,
                 NULL,
                 XdowsSecurityRegistryOperationReplaceKey,
@@ -572,7 +572,7 @@ XdowsRegistryCallback(
         PREG_UNLOAD_KEY_INFORMATION info =
             (PREG_UNLOAD_KEY_INFORMATION)Argument2;
         return info != NULL
-            ? XdowsRegistryDecideObjectMutation(
+            ? RegistryDecideObjectMutation(
                 info->Object,
                 NULL,
                 XdowsSecurityRegistryOperationUnloadKey,
@@ -585,7 +585,7 @@ XdowsRegistryCallback(
 }
 
 NTSTATUS
-XdowsRegistryProtectInitialize(
+RegistryProtectInitialize(
     VOID
     )
 {
@@ -595,22 +595,22 @@ XdowsRegistryProtectInitialize(
 
     RtlZeroMemory(&g_RegistryGuard, sizeof(g_RegistryGuard));
     ExInitializePushLock(&g_RegistryGuard.Lock);
-    if (g_XdowsDriverContext.Device == NULL) {
+    if (g_DriverContext.Device == NULL) {
         return STATUS_INVALID_DEVICE_STATE;
     }
 
     driverObject = WdfDriverWdmGetDriverObject(
-        WdfDeviceGetDriver(g_XdowsDriverContext.Device));
+        WdfDeviceGetDriver(g_DriverContext.Device));
     RtlInitUnicodeString(&altitude, XDOWS_REGISTRY_ALTITUDE);
     status = CmRegisterCallbackEx(
-        XdowsRegistryCallback,
+        RegistryCallback,
         &altitude,
         driverObject,
         NULL,
         &g_RegistryGuard.Cookie,
         NULL);
     if (!NT_SUCCESS(status)) {
-        XdowsLogWriteStatus(
+        LogWriteStatus(
             XdowsSecurityLogError,
             0,
             0,
@@ -621,7 +621,7 @@ XdowsRegistryProtectInitialize(
     }
 
     g_RegistryGuard.CallbackRegistered = TRUE;
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogInfo,
         0,
         0,
@@ -631,7 +631,7 @@ XdowsRegistryProtectInitialize(
 }
 
 VOID
-XdowsRegistryProtectShutdown(
+RegistryProtectShutdown(
     VOID
     )
 {
@@ -650,7 +650,7 @@ XdowsRegistryProtectShutdown(
 }
 
 NTSTATUS
-XdowsRegistryProtectConfigure(
+RegistryProtectConfigure(
     _In_ PXDOWS_SECURITY_REGISTRY_PROTECTION_REQUEST Request
     )
 {
@@ -693,7 +693,7 @@ XdowsRegistryProtectConfigure(
     ExReleasePushLockExclusive(&g_RegistryGuard.Lock);
     KeLeaveCriticalRegion();
 
-    XdowsLogWrite(
+    LogWrite(
         XdowsSecurityLogInfo,
         0,
         0,
@@ -705,7 +705,7 @@ XdowsRegistryProtectConfigure(
 }
 
 BOOLEAN
-XdowsRegistryProtectIsEnabled(
+RegistryProtectIsEnabled(
     VOID
     )
 {

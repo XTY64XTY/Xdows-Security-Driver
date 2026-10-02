@@ -112,7 +112,7 @@ PsLookupProcessByProcessId(
 //
 static
 BOOLEAN
-XdowsBehaviorLeafNameEquals(
+BehaviorLeafNameEquals(
     _In_ PCUNICODE_STRING Path,
     _In_ PCSTR KnownName
     )
@@ -162,7 +162,7 @@ XdowsBehaviorLeafNameEquals(
 
 static
 BOOLEAN
-XdowsBehaviorImageNameEquals(
+BehaviorImageNameEquals(
     _In_ PCSTR ImageName,
     _In_ PCSTR KnownName
     )
@@ -193,7 +193,7 @@ XdowsBehaviorImageNameEquals(
 }
 
 NTSTATUS
-XdowsBehaviorProtectInitialize(
+BehaviorProtectInitialize(
     VOID
     )
 {
@@ -208,23 +208,23 @@ XdowsBehaviorProtectInitialize(
         g_RuleSetLockInitialized = TRUE;
     }
     (VOID)InterlockedExchange(&g_BehaviorProtectionEnabled, 1);
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
         L"R0 behavior protection active.");
     return STATUS_SUCCESS;
 }
 
 VOID
-XdowsBehaviorProtectShutdown(
+BehaviorProtectShutdown(
     VOID
     )
 {
     (VOID)InterlockedExchange(&g_BehaviorProtectionEnabled, 0);
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
         L"R0 behavior protection stopped.");
 }
 
 BOOLEAN
-XdowsBehaviorProtectIsEnabled(
+BehaviorProtectIsEnabled(
     VOID
     )
 {
@@ -237,7 +237,7 @@ XdowsBehaviorProtectIsEnabled(
 //
 static
 BOOLEAN
-XdowsBehaviorContainsW(
+BehaviorContainsW(
     _In_reads_(HaystackLen) PCWSTR Haystack,
     _In_ SIZE_T HaystackLen,
     _In_ PCWSTR Needle
@@ -269,7 +269,7 @@ XdowsBehaviorContainsW(
 //
 static
 VOID
-XdowsBehaviorLowercaseInto(
+BehaviorLowercaseInto(
     _Out_writes_(DestChars) PWCHAR Dest,
     _In_ SIZE_T DestChars,
     _In_opt_ PCUNICODE_STRING Source
@@ -305,7 +305,7 @@ XdowsBehaviorLowercaseInto(
 // Rule engine entry point. See header for the rule catalogue.
 //
 XDOWS_SECURITY_BEHAVIOR_TYPE
-XdowsBehaviorInspectCommandLine(
+BehaviorInspectCommandLine(
     _In_opt_ PCUNICODE_STRING CommandLine
     )
 {
@@ -317,7 +317,7 @@ XdowsBehaviorInspectCommandLine(
         return XdowsSecurityBehaviorNone;
     }
 
-    XdowsBehaviorLowercaseInto(cmd, RTL_NUMBER_OF(cmd), CommandLine);
+    BehaviorLowercaseInto(cmd, RTL_NUMBER_OF(cmd), CommandLine);
     cmdLen = wcsnlen(cmd, RTL_NUMBER_OF(cmd));
     if (cmdLen == 0) {
         return XdowsSecurityBehaviorNone;
@@ -334,14 +334,14 @@ XdowsBehaviorInspectCommandLine(
     // "vssadmin" and "delete" in unrelated contexts (e.g. a script path)
     // does not trip the rule.
     //
-    if ((XdowsBehaviorContainsW(cmd, cmdLen, L"vssadmin") &&
-         XdowsBehaviorContainsW(cmd, cmdLen, L"delete") &&
-         XdowsBehaviorContainsW(cmd, cmdLen, L"shadow")) ||
-        (XdowsBehaviorContainsW(cmd, cmdLen, L"shadowcopy") &&
-         XdowsBehaviorContainsW(cmd, cmdLen, L"delete")) ||
-        (XdowsBehaviorContainsW(cmd, cmdLen, L"wbadmin") &&
-         XdowsBehaviorContainsW(cmd, cmdLen, L"delete") &&
-         XdowsBehaviorContainsW(cmd, cmdLen, L"catalog"))) {
+    if ((BehaviorContainsW(cmd, cmdLen, L"vssadmin") &&
+         BehaviorContainsW(cmd, cmdLen, L"delete") &&
+         BehaviorContainsW(cmd, cmdLen, L"shadow")) ||
+        (BehaviorContainsW(cmd, cmdLen, L"shadowcopy") &&
+         BehaviorContainsW(cmd, cmdLen, L"delete")) ||
+        (BehaviorContainsW(cmd, cmdLen, L"wbadmin") &&
+         BehaviorContainsW(cmd, cmdLen, L"delete") &&
+         BehaviorContainsW(cmd, cmdLen, L"catalog"))) {
         return XdowsSecurityBehaviorVssDeletion;
     }
 
@@ -349,11 +349,11 @@ XdowsBehaviorInspectCommandLine(
     // Rule 2: Hidden PowerShell window.
     //   -windowstyle hidden  |  -w hidden  |  -win hidden
     //
-    if ((XdowsBehaviorContainsW(cmd, cmdLen, L"powershell") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"pwsh")) &&
-        (XdowsBehaviorContainsW(cmd, cmdLen, L"-windowstyle hidden") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"-w hidden") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"-win hidden"))) {
+    if ((BehaviorContainsW(cmd, cmdLen, L"powershell") ||
+         BehaviorContainsW(cmd, cmdLen, L"pwsh")) &&
+        (BehaviorContainsW(cmd, cmdLen, L"-windowstyle hidden") ||
+         BehaviorContainsW(cmd, cmdLen, L"-w hidden") ||
+         BehaviorContainsW(cmd, cmdLen, L"-win hidden"))) {
         return XdowsSecurityBehaviorHiddenPowerShell;
     }
 
@@ -363,10 +363,10 @@ XdowsBehaviorInspectCommandLine(
     // Scoped to powershell/pwsh to avoid false positives from unrelated
     // tools that accept an "-enc" argument.
     //
-    if ((XdowsBehaviorContainsW(cmd, cmdLen, L"-enc ") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"-encodedcommand ")) &&
-        (XdowsBehaviorContainsW(cmd, cmdLen, L"powershell") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"pwsh"))) {
+    if ((BehaviorContainsW(cmd, cmdLen, L"-enc ") ||
+         BehaviorContainsW(cmd, cmdLen, L"-encodedcommand ")) &&
+        (BehaviorContainsW(cmd, cmdLen, L"powershell") ||
+         BehaviorContainsW(cmd, cmdLen, L"pwsh"))) {
         return XdowsSecurityBehaviorEncodedCommand;
     }
 
@@ -378,11 +378,11 @@ XdowsBehaviorInspectCommandLine(
     // -ExecutionPolicy Bypass is a common legitimate pattern in enterprise
     // admin scripts. The user-mode model correlates it with other signals.
     //
-    if ((XdowsBehaviorContainsW(cmd, cmdLen, L"-executionpolicy bypass") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"-ep bypass") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"-epbypass")) &&
-        (XdowsBehaviorContainsW(cmd, cmdLen, L"powershell") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"pwsh"))) {
+    if ((BehaviorContainsW(cmd, cmdLen, L"-executionpolicy bypass") ||
+         BehaviorContainsW(cmd, cmdLen, L"-ep bypass") ||
+         BehaviorContainsW(cmd, cmdLen, L"-epbypass")) &&
+        (BehaviorContainsW(cmd, cmdLen, L"powershell") ||
+         BehaviorContainsW(cmd, cmdLen, L"pwsh"))) {
         return XdowsSecurityBehaviorPolicyBypass;
     }
 
@@ -391,11 +391,11 @@ XdowsBehaviorInspectCommandLine(
     //   DownloadString / DownloadFile / Invoke-WebRequest /
     //   Net.WebClient / Start-BitsTransfer
     //
-    if (XdowsBehaviorContainsW(cmd, cmdLen, L"downloadstring") ||
-        XdowsBehaviorContainsW(cmd, cmdLen, L"downloadfile") ||
-        XdowsBehaviorContainsW(cmd, cmdLen, L"invoke-webrequest") ||
-        XdowsBehaviorContainsW(cmd, cmdLen, L"net.webclient") ||
-        XdowsBehaviorContainsW(cmd, cmdLen, L"start-bitstransfer")) {
+    if (BehaviorContainsW(cmd, cmdLen, L"downloadstring") ||
+        BehaviorContainsW(cmd, cmdLen, L"downloadfile") ||
+        BehaviorContainsW(cmd, cmdLen, L"invoke-webrequest") ||
+        BehaviorContainsW(cmd, cmdLen, L"net.webclient") ||
+        BehaviorContainsW(cmd, cmdLen, L"start-bitstransfer")) {
         return XdowsSecurityBehaviorDownloadExecute;
     }
 
@@ -405,20 +405,20 @@ XdowsBehaviorInspectCommandLine(
     //   mshta http|javascript|vbscript  (scriptlet download via HTA)
     //   rundll32 javascript:  (rare legitimate use)
     //
-    if (XdowsBehaviorContainsW(cmd, cmdLen, L"certutil") &&
-        XdowsBehaviorContainsW(cmd, cmdLen, L"-urlcache")) {
+    if (BehaviorContainsW(cmd, cmdLen, L"certutil") &&
+        BehaviorContainsW(cmd, cmdLen, L"-urlcache")) {
         return XdowsSecurityBehaviorLolbinAbuse;
     }
 
-    if (XdowsBehaviorContainsW(cmd, cmdLen, L"mshta") &&
-        (XdowsBehaviorContainsW(cmd, cmdLen, L"http") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"javascript") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"vbscript"))) {
+    if (BehaviorContainsW(cmd, cmdLen, L"mshta") &&
+        (BehaviorContainsW(cmd, cmdLen, L"http") ||
+         BehaviorContainsW(cmd, cmdLen, L"javascript") ||
+         BehaviorContainsW(cmd, cmdLen, L"vbscript"))) {
         return XdowsSecurityBehaviorLolbinAbuse;
     }
 
-    if (XdowsBehaviorContainsW(cmd, cmdLen, L"rundll32") &&
-        XdowsBehaviorContainsW(cmd, cmdLen, L"javascript:")) {
+    if (BehaviorContainsW(cmd, cmdLen, L"rundll32") &&
+        BehaviorContainsW(cmd, cmdLen, L"javascript:")) {
         return XdowsSecurityBehaviorLolbinAbuse;
     }
 
@@ -430,12 +430,12 @@ XdowsBehaviorInspectCommandLine(
     // simply flags any matching command line. Matched as "rd "/"rd/" tokens
     // so "rd" inside unrelated words does not trip the rule.
     //
-    if (XdowsBehaviorContainsW(cmd, cmdLen, L"/s") &&
-        XdowsBehaviorContainsW(cmd, cmdLen, L"/q") &&
-        (XdowsBehaviorContainsW(cmd, cmdLen, L"rd /") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"rd/") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"rmdir /") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"rmdir/"))) {
+    if (BehaviorContainsW(cmd, cmdLen, L"/s") &&
+        BehaviorContainsW(cmd, cmdLen, L"/q") &&
+        (BehaviorContainsW(cmd, cmdLen, L"rd /") ||
+         BehaviorContainsW(cmd, cmdLen, L"rd/") ||
+         BehaviorContainsW(cmd, cmdLen, L"rmdir /") ||
+         BehaviorContainsW(cmd, cmdLen, L"rmdir/"))) {
         return XdowsSecurityBehaviorDestructiveDirectoryDelete;
     }
 
@@ -444,8 +444,8 @@ XdowsBehaviorInspectCommandLine(
     // standard post-exploitation pair for hijacking files and registry keys.
     // Legitimate use is common enough that user mode gates on actor trust.
     //
-    if (XdowsBehaviorContainsW(cmd, cmdLen, L"takeown") ||
-        XdowsBehaviorContainsW(cmd, cmdLen, L"icacls")) {
+    if (BehaviorContainsW(cmd, cmdLen, L"takeown") ||
+        BehaviorContainsW(cmd, cmdLen, L"icacls")) {
         return XdowsSecurityBehaviorOwnershipEscalation;
     }
 
@@ -455,8 +455,8 @@ XdowsBehaviorInspectCommandLine(
     // attacker /add). User mode gates on actor trust; the kernel flags the
     // command line and blocks the launch until a verdict arrives.
     //
-    if (XdowsBehaviorContainsW(cmd, cmdLen, L"shutdown") ||
-        XdowsBehaviorContainsW(cmd, cmdLen, L"net user")) {
+    if (BehaviorContainsW(cmd, cmdLen, L"shutdown") ||
+        BehaviorContainsW(cmd, cmdLen, L"net user")) {
         return XdowsSecurityBehaviorSystemControlCommand;
     }
 
@@ -469,8 +469,8 @@ XdowsBehaviorInspectCommandLine(
     // Fail-CLOSED: matched as two independent substrings so any "mountvol"
     // invocation carrying "/s" trips the rule.
     //
-    if (XdowsBehaviorContainsW(cmd, cmdLen, L"mountvol") &&
-        XdowsBehaviorContainsW(cmd, cmdLen, L"/s")) {
+    if (BehaviorContainsW(cmd, cmdLen, L"mountvol") &&
+        BehaviorContainsW(cmd, cmdLen, L"/s")) {
         return XdowsSecurityBehaviorEfiMount;
     }
 
@@ -486,10 +486,10 @@ XdowsBehaviorInspectCommandLine(
     // Fail-CLOSED: the destructive switches are the attack, not incidental
     // management tooling.
     //
-    if (XdowsBehaviorContainsW(cmd, cmdLen, L"sysprep") &&
-        (XdowsBehaviorContainsW(cmd, cmdLen, L"/oobe") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"/generalize") ||
-         XdowsBehaviorContainsW(cmd, cmdLen, L"/audit"))) {
+    if (BehaviorContainsW(cmd, cmdLen, L"sysprep") &&
+        (BehaviorContainsW(cmd, cmdLen, L"/oobe") ||
+         BehaviorContainsW(cmd, cmdLen, L"/generalize") ||
+         BehaviorContainsW(cmd, cmdLen, L"/audit"))) {
         return XdowsSecurityBehaviorOobeReset;
     }
 
@@ -503,7 +503,7 @@ XdowsBehaviorInspectCommandLine(
 // reach the user-decision path.
 //
 XDOWS_SECURITY_BEHAVIOR_TYPE
-XdowsBehaviorInspectParentChain(
+BehaviorInspectParentChain(
     _In_ ULONG ParentProcessId,
     _In_ PCUNICODE_STRING ChildImageName
     )
@@ -534,7 +534,7 @@ XdowsBehaviorInspectParentChain(
     // lookup.
     //
     for (i = 0; i < RTL_NUMBER_OF(scriptHosts); i++) {
-        if (XdowsBehaviorLeafNameEquals(ChildImageName, scriptHosts[i])) {
+        if (BehaviorLeafNameEquals(ChildImageName, scriptHosts[i])) {
             break;
         }
     }
@@ -554,7 +554,7 @@ XdowsBehaviorInspectParentChain(
     }
 
     for (i = 0; i < RTL_NUMBER_OF(documentParents); i++) {
-        if (XdowsBehaviorImageNameEquals(parentImage, documentParents[i])) {
+        if (BehaviorImageNameEquals(parentImage, documentParents[i])) {
             ObDereferenceObject(parent);
             return XdowsSecurityBehaviorParentProcessChain;
         }
@@ -576,7 +576,7 @@ XdowsBehaviorInspectParentChain(
 //
 static
 BOOLEAN
-XdowsBehaviorBufferContains(
+BehaviorBufferContains(
     _In_reads_(HaystackLen) PCWSTR Haystack,
     _In_ SIZE_T HaystackLen,
     _In_ PCWSTR Needle
@@ -601,7 +601,7 @@ XdowsBehaviorBufferContains(
 //
 static
 BOOLEAN
-XdowsBehaviorStringContains(
+BehaviorStringContains(
     _In_ PCUNICODE_STRING Haystack,
     _In_ PCUNICODE_STRING Needle
     )
@@ -627,7 +627,7 @@ XdowsBehaviorStringContains(
 //
 static
 BOOLEAN
-XdowsBehaviorPathContainsSegment(
+BehaviorPathContainsSegment(
     _In_ PCUNICODE_STRING Path,
     _In_ PCUNICODE_STRING Segment
     )
@@ -653,7 +653,7 @@ XdowsBehaviorPathContainsSegment(
 
 static
 BOOLEAN
-XdowsBehaviorTermIsEmpty(
+BehaviorTermIsEmpty(
     _In_ PCWSTR Term
     )
 {
@@ -666,7 +666,7 @@ XdowsBehaviorTermIsEmpty(
 //
 static
 BOOLEAN
-XdowsBehaviorPatternMatchesActor(
+BehaviorPatternMatchesActor(
     _In_ PCWSTR Pattern,
     _In_opt_ PCUNICODE_STRING ActorPath,
     _In_opt_ PCSTR ActorImageName
@@ -677,7 +677,7 @@ XdowsBehaviorPatternMatchesActor(
     UNICODE_STRING pathView;
     CHAR leaf[XDOWS_BEHAVIOR_IMAGE_NAME_MAX_CHARS + 1];
 
-    if (XdowsBehaviorTermIsEmpty(Pattern)) {
+    if (BehaviorTermIsEmpty(Pattern)) {
         return FALSE;
     }
 
@@ -719,12 +719,12 @@ XdowsBehaviorPatternMatchesActor(
         return FALSE;
     }
     leaf[i] = '\0';
-    return XdowsBehaviorImageNameEquals(ActorImageName, leaf);
+    return BehaviorImageNameEquals(ActorImageName, leaf);
 }
 
 static
 BOOLEAN
-XdowsBehaviorRuleInitiatorMatches(
+BehaviorRuleInitiatorMatches(
     _In_ PXDOWS_SECURITY_BEHAVIOR_RULE Rule,
     _In_opt_ PCUNICODE_STRING ActorPath,
     _In_opt_ PCSTR ActorImageName
@@ -736,7 +736,7 @@ XdowsBehaviorRuleInitiatorMatches(
         return TRUE;
     }
     for (i = 0; i < Rule->Initiator.TermCount; i++) {
-        if (XdowsBehaviorPatternMatchesActor(
+        if (BehaviorPatternMatchesActor(
                 Rule->Initiator.Terms[i],
                 ActorPath,
                 ActorImageName)) {
@@ -752,7 +752,7 @@ XdowsBehaviorRuleInitiatorMatches(
 //
 static
 BOOLEAN
-XdowsBehaviorRuleCommandLineMatches(
+BehaviorRuleCommandLineMatches(
     _In_ PXDOWS_SECURITY_BEHAVIOR_RULE Rule,
     _In_reads_(CommandLength) PCWSTR CommandLineLower,
     _In_ SIZE_T CommandLength
@@ -765,10 +765,10 @@ XdowsBehaviorRuleCommandLineMatches(
     }
     for (i = 0; i < Rule->CommandLine.TermCount; i++) {
         PCWSTR term = Rule->CommandLine.Terms[i];
-        if (XdowsBehaviorTermIsEmpty(term)) {
+        if (BehaviorTermIsEmpty(term)) {
             continue;
         }
-        if (!XdowsBehaviorBufferContains(CommandLineLower, CommandLength, term)) {
+        if (!BehaviorBufferContains(CommandLineLower, CommandLength, term)) {
             return FALSE;
         }
     }
@@ -777,7 +777,7 @@ XdowsBehaviorRuleCommandLineMatches(
 
 static
 BOOLEAN
-XdowsBehaviorRuleTargetMatches(
+BehaviorRuleTargetMatches(
     _In_ PXDOWS_SECURITY_BEHAVIOR_RULE Rule,
     _In_opt_ PCUNICODE_STRING TargetPath
     )
@@ -801,7 +801,7 @@ XdowsBehaviorRuleTargetMatches(
     for (i = 0; i < Rule->Target.TermCount; i++) {
         PCWSTR term = Rule->Target.Terms[i];
 
-        if (XdowsBehaviorTermIsEmpty(term)) {
+        if (BehaviorTermIsEmpty(term)) {
             continue;
         }
         RtlInitUnicodeString(&termView, term);
@@ -814,7 +814,7 @@ XdowsBehaviorRuleTargetMatches(
             }
             break;
         case XdowsSecurityRuleMatchSegment:
-            if (XdowsBehaviorPathContainsSegment(&pathView, &termView)) {
+            if (BehaviorPathContainsSegment(&pathView, &termView)) {
                 return TRUE;
             }
             break;
@@ -825,7 +825,7 @@ XdowsBehaviorRuleTargetMatches(
             }
             break;
         case XdowsSecurityRuleMatchContains:
-            if (XdowsBehaviorStringContains(&pathView, &termView)) {
+            if (BehaviorStringContains(&pathView, &termView)) {
                 return TRUE;
             }
             break;
@@ -843,7 +843,7 @@ XdowsBehaviorRuleTargetMatches(
 //
 static
 BOOLEAN
-XdowsBehaviorRuleRateAllows(
+BehaviorRuleRateAllows(
     _In_ ULONG RuleId,
     _In_ ULONG ProcessId,
     _In_ ULONG Threshold,
@@ -924,7 +924,7 @@ XdowsBehaviorRuleRateAllows(
 //
 static
 NTSTATUS
-XdowsBehaviorValidateAxis(
+BehaviorValidateAxis(
     _In_ PXDOWS_SECURITY_RULE_TERM_AXIS Axis
     )
 {
@@ -961,7 +961,7 @@ XdowsBehaviorValidateAxis(
 }
 
 NTSTATUS
-XdowsBehaviorConfigureRules(
+BehaviorConfigureRules(
     _In_ PXDOWS_SECURITY_BEHAVIOR_RULE_REQUEST Request
     )
 {
@@ -995,9 +995,9 @@ XdowsBehaviorConfigureRules(
         if (rule->Threshold != 0 && rule->Threshold > 10000u) {
             return STATUS_INVALID_PARAMETER;
         }
-        if (!NT_SUCCESS(XdowsBehaviorValidateAxis(&rule->Initiator)) ||
-            !NT_SUCCESS(XdowsBehaviorValidateAxis(&rule->Target)) ||
-            !NT_SUCCESS(XdowsBehaviorValidateAxis(&rule->CommandLine))) {
+        if (!NT_SUCCESS(BehaviorValidateAxis(&rule->Initiator)) ||
+            !NT_SUCCESS(BehaviorValidateAxis(&rule->Target)) ||
+            !NT_SUCCESS(BehaviorValidateAxis(&rule->CommandLine))) {
             return STATUS_INVALID_PARAMETER;
         }
     }
@@ -1019,13 +1019,13 @@ XdowsBehaviorConfigureRules(
 
     RtlZeroMemory(g_BehaviorRateSlots, sizeof(g_BehaviorRateSlots));
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
         L"Declarative behavior rule set applied.");
     return STATUS_SUCCESS;
 }
 
 NTSTATUS
-XdowsBehaviorConfigureInitiatorExclusions(
+BehaviorConfigureInitiatorExclusions(
     _In_ PXDOWS_SECURITY_INITIATOR_EXCLUSION_REQUEST Request
     )
 {
@@ -1071,13 +1071,13 @@ XdowsBehaviorConfigureInitiatorExclusions(
     ExReleasePushLockExclusive(&g_RuleSetLock);
     KeLeaveCriticalRegion();
 
-    XdowsLogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
+    LogWrite(XdowsSecurityLogInfo, 0, 0, L"Behavior",
         L"Initiator exclusion list applied.");
     return STATUS_SUCCESS;
 }
 
 BOOLEAN
-XdowsBehaviorIsInitiatorExcluded(
+BehaviorIsInitiatorExcluded(
     _In_ ULONG Scope,
     _In_opt_ PCUNICODE_STRING ActorPath,
     _In_opt_ PCSTR ActorImageName
@@ -1098,7 +1098,7 @@ XdowsBehaviorIsInitiatorExcluded(
         if ((entry->ScopeMask & Scope) == 0) {
             continue;
         }
-        if (XdowsBehaviorPatternMatchesActor(
+        if (BehaviorPatternMatchesActor(
                 entry->Pattern,
                 ActorPath,
                 ActorImageName)) {
@@ -1112,7 +1112,7 @@ XdowsBehaviorIsInitiatorExcluded(
 }
 
 BOOLEAN
-XdowsBehaviorEvaluateCustomRules(
+BehaviorEvaluateCustomRules(
     _In_opt_ PCUNICODE_STRING ActorPath,
     _In_opt_ PCSTR ActorImageName,
     _In_opt_ PCUNICODE_STRING CommandLine,
@@ -1149,7 +1149,7 @@ XdowsBehaviorEvaluateCustomRules(
 
     if (CommandLine != NULL && CommandLine->Buffer != NULL &&
         CommandLine->Length != 0) {
-        XdowsBehaviorLowercaseInto(
+        BehaviorLowercaseInto(
             commandLower,
             RTL_NUMBER_OF(commandLower),
             CommandLine);
@@ -1164,13 +1164,13 @@ XdowsBehaviorEvaluateCustomRules(
         if ((rule->Operations & Operation) == 0) {
             continue;
         }
-        if (!XdowsBehaviorRuleInitiatorMatches(rule, ActorPath, ActorImageName)) {
+        if (!BehaviorRuleInitiatorMatches(rule, ActorPath, ActorImageName)) {
             continue;
         }
-        if (!XdowsBehaviorRuleCommandLineMatches(rule, commandLower, commandLength)) {
+        if (!BehaviorRuleCommandLineMatches(rule, commandLower, commandLength)) {
             continue;
         }
-        if (!XdowsBehaviorRuleTargetMatches(rule, TargetPath)) {
+        if (!BehaviorRuleTargetMatches(rule, TargetPath)) {
             continue;
         }
 
@@ -1189,7 +1189,7 @@ XdowsBehaviorEvaluateCustomRules(
     // IRQL to DISPATCH_LEVEL, which must not happen while a push lock is held.
     //
     if (matchedId != 0 && matchedThreshold != 0 &&
-        !XdowsBehaviorRuleRateAllows(
+        !BehaviorRuleRateAllows(
             matchedId,
             ActorProcessId,
             matchedThreshold,
@@ -1213,7 +1213,7 @@ XdowsBehaviorEvaluateCustomRules(
 }
 
 PCWSTR
-XdowsBehaviorTypeName(
+BehaviorTypeName(
     _In_ XDOWS_SECURITY_BEHAVIOR_TYPE Type
     )
 {
@@ -1247,7 +1247,7 @@ XdowsBehaviorTypeName(
 // agree on what a script host is.
 //
 BOOLEAN
-XdowsBehaviorImageNameIsScriptHost(
+BehaviorImageNameIsScriptHost(
     _In_ PCSTR ImageName
     )
 {
@@ -1261,7 +1261,7 @@ XdowsBehaviorImageNameIsScriptHost(
         return FALSE;
     }
     for (i = 0; i < RTL_NUMBER_OF(scriptHosts); i++) {
-        if (XdowsBehaviorImageNameEquals(ImageName, scriptHosts[i])) {
+        if (BehaviorImageNameEquals(ImageName, scriptHosts[i])) {
             return TRUE;
         }
     }
